@@ -4,91 +4,182 @@ const { Server } = require("socket.io");
 const path = require('path');
 
 const PORT = 8080;
-// !!! ВАЖЛИВО: Це ваш секретний ID. Не діліться ним ні з ким. !!!
 const ADMIN_USER_ID = "super-secret-admin-key-123";
+const OUT_OF_ZONE_TIMER = 600; // 10 хвилин в секундах
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// Обслуговуємо файли сайту з папки 'public'
 app.use(express.static(path.join(__dirname, 'public')));
 
 // --- Стан гри ---
-let players = {}; // { userId: { id, name, location, socketId } }
+let users = {}; // { username: password }
+let players = {}; // { userId: { id, name, location, socketId, isOutOfZone, outOfZoneSince, eliminated } }
 let gameZone = {
   latitude: 50.7472,
   longitude: 25.3253,
   radius: 5000,
 };
 
-io.on('connection', (socket) => {
-  const { userId, isBeacon } = socket.handshake.query;
+// Функція для розрахунку відстані між двома точками
+function getDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371e3; // Радіус Землі в метрах
+    const φ1 = lat1 * Math.PI/180;
+    const φ2 = lat2 * Math.PI/180;
+    const Δφ = (lat2-lat1) * Math.PI/180;
+    const Δλ = (lon2-lon1) * Math.PI/180;
+    const a = Math.sin(Δφ/2) * Math.sin(Δφ/2) +
+              Math.cos(φ1) * Math.cos(φ2) *
+              Math.sin(Δλ/2) * Math.sin(Δλ/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+}
 
-  if (!userId) return socket.disconnect();
+// --- ГОЛОВНИЙ ІГРОВИЙ ЦИКЛ ---
+setInterval(() => {
+    const now = Math.floor(Date.now() / 1000); // Поточний час в секундах
+    let needsUpdate = false;
 
-  // --- ЛОГІКА ДЛЯ МАЯЧКІВ (мобільних додатків) ---
-  if (isBeacon) {
-    console.log(`[Сервер] Маячок підключився: UserID ${userId}`);
-    if (!players[userId]) {
-      players[userId] = { id: userId, name: `Гравець ${userId.substring(0, 4)}`, location: null };
+    for (const userId in players) {
+        const player = players[userId];
+        if (player.eliminated || !player.location) continue;
+
+        const distance = getDistance(
+            player.location.latitude, player.location.longitude,
+            gameZone.latitude, gameZone.longitude
+        );
+
+        // Перевірка, чи гравець поза зоною
+        if (distance > gameZone.radius) {
+            if (!player.isOutOfZone) {
+                player.isOutOfZone = true;
+                player.outOfZoneSince = now;
+                needsUpdate = true;
+                broadcastEvent(`Гравець ${player.name} вийшов за межі зони!`);
+            }
+            // Перевірка, чи не вичерпався час
+            if (now - player.outOfZoneSince > OUT_OF_ZONE_TIMER) {
+                player.eliminated = true;
+                needsUpdate = true;
+                broadcastEvent(`Гравець ${player.name} вибув (час вийшов)!`);
+            }
+        } else {
+            if (player.isOutOfZone) {
+                player.isOutOfZone = false;
+                player.outOfZoneSince = null;
+                needsUpdate = true;
+                broadcastEvent(`Гравець ${player.name} повернувся в зону!`);
+            }
+        }
     }
-    players[userId].beaconSocketId = socket.id;
 
-    socket.on('update_location', (locationData) => {
-      if (players[userId]) {
-        players[userId].location = locationData;
-        // Надсилаємо оновлення ВСІМ глядачам (і адміну, і гравцям)
+    if (needsUpdate) {
         updateViewers();
-      }
-    });
-  } 
-  // --- ЛОГІКА ДЛЯ ГЛЯДАЧІВ (веб-браузерів) ---
-  else {
-    console.log(`[Сервер] Глядач підключився: UserID ${userId}`);
-    // Якщо це адмін, додаємо йому слухачі для керування грою
-    if (userId === ADMIN_USER_ID) {
-        console.log(`[Сервер] !!! АДМІН УВІЙШОВ У СИСТЕМУ !!!`);
-        socket.on('admin_update_zone', (newZone) => {
-            gameZone = newZone;
-            console.log(`[Адмін] Зона оновлена`);
-            updateViewers();
+    }
+}, 1000); // Перевіряємо кожну секунду
+
+io.on('connection', (socket) => {
+    const { userId, isBeacon } = socket.handshake.query;
+    if (!userId) return socket.disconnect();
+
+    if (isBeacon) {
+        // Логіка для маячків
+        players[userId].beaconSocketId = socket.id;
+        socket.on('update_location', (locationData) => {
+            if (players[userId]) {
+                players[userId].location = locationData;
+                updateViewers();
+            }
         });
-    }
-  }
-
-  // При будь-якому новому підключенні, надсилаємо актуальні дані
-  updateViewers();
-
-  socket.on('disconnect', () => {
-    if (players[userId] && players[userId].beaconSocketId === socket.id) {
-      console.log(`[Сервер] Маячок відключився: UserID ${userId}`);
-      delete players[userId].beaconSocketId;
     } else {
-      console.log(`[Сервер] Глядач відключився: UserID ${userId}`);
+        // Логіка для веб-глядачів (гравці та адмін)
+        if (userId === ADMIN_USER_ID) {
+            socket.on('admin_update_zone', (newZone) => {
+                gameZone = newZone;
+                broadcastEvent('Адміністратор оновив ігрову зону!');
+                updateViewers();
+            });
+            socket.on('admin_eliminate_player', (playerId) => {
+                if (players[playerId]) {
+                    players[playerId].eliminated = true;
+                    broadcastEvent(`Гравець ${players[playerId].name} був виключений адміном!`);
+                    updateViewers();
+                }
+            });
+            socket.on('admin_broadcast_message', (message) => {
+                broadcastEvent(`[ОГОЛОШЕННЯ] ${message}`);
+            });
+        }
     }
-    updateViewers();
-  });
+    
+    // --- Система акаунтів ---
+    socket.on('register', ({ username, password }, callback) => {
+        if (users[username]) {
+            return callback({ success: false, message: 'Користувач вже існує' });
+        }
+        users[username] = password;
+        console.log(`[Реєстрація] Новий користувач: ${username}`);
+        callback({ success: true });
+    });
+
+    socket.on('login', ({ username, password }, callback) => {
+        if (users[username] && users[username] === password) {
+            const newUserId = `user-${username}`;
+            players[newUserId] = {
+                id: newUserId,
+                name: username,
+                location: null,
+                isOutOfZone: false,
+                outOfZoneSince: null,
+                eliminated: false,
+            };
+            console.log(`[Вхід] Користувач ${username} увійшов в систему.`);
+            callback({ success: true, userId: newUserId });
+            updateViewers();
+        } else {
+            callback({ success: false, message: 'Неправильний логін або пароль' });
+        }
+    });
+
+    updateViewers(); // Надсилаємо дані при підключенні
+
+    socket.on('disconnect', () => {
+        if (players[userId]) {
+            delete players[userId].beaconSocketId;
+        }
+        updateViewers();
+    });
 });
 
-// Функція, що надсилає оновлення всім веб-клієнтам
+function broadcastEvent(message) {
+    io.emit('game_event', message);
+}
+
 function updateViewers() {
-    // Проходимо по всіх активних з'єднаннях
+    const now = Math.floor(Date.now() / 1000);
     io.sockets.sockets.forEach(socket => {
         const { userId, isBeacon } = socket.handshake.query;
-        if (isBeacon) return; // Ігноруємо маячки
+        if (isBeacon) return;
 
-        // Якщо це адмін, надсилаємо йому дані про ВСІХ гравців
+        const fullData = { 
+            players: Object.values(players), 
+            zone: gameZone, 
+            serverTime: now 
+        };
+
         if (userId === ADMIN_USER_ID) {
-            socket.emit('game_update', { players: Object.values(players), zone: gameZone });
-        } 
-        // Якщо це звичайний гравець, надсилаємо дані ТІЛЬКИ про нього
-        else if (players[userId]) {
-            socket.emit('game_update', { players: [players[userId]], zone: gameZone });
+            socket.emit('game_update', fullData);
+        } else if (players[userId]) {
+            const playerData = {
+                ...fullData,
+                players: [players[userId]], // Надсилаємо дані тільки про себе
+            };
+            socket.emit('game_update', playerData);
         }
     });
 }
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`[Сервер] Сервер запущено на всіх інтерфейсах, порт ${PORT}`);
+    console.log(`[Сервер] Сервер запущено на всіх інтерфейсах, порт ${PORT}`);
 });

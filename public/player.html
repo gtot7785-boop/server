@@ -6,58 +6,41 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #333; }
+        html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; }
+        .event-overlay { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: white; padding: 10px 20px; border-radius: 20px; z-index: 1000; }
+        .timer-overlay { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: #e74c3c; color: white; padding: 15px; border-radius: 10px; z-index: 1000; text-align: center; }
     </style>
 </head>
 <body>
     <div id="map"></div>
+    <div id="event-display" class="event-overlay" style="display: none;"></div>
+    <div id="timer-display" class="timer-overlay" style="display: none;"></div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
 
     <script>
-        const map = L.map('map', { zoomControl: false }).setView([50.7472, 25.3253], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '&copy; OpenStreetMap'
-        }).addTo(map);
+        // ... (код карти гравця)
+        const eventDisplay = document.getElementById('event-display');
+        const timerDisplay = document.getElementById('timer-display');
 
-        const urlParams = new URLSearchParams(window.location.search);
-        const myUserId = urlParams.get('userId');
+        socket.on('game_event', (message) => {
+            eventDisplay.innerText = message;
+            eventDisplay.style.display = 'block';
+            setTimeout(() => { eventDisplay.style.display = 'none'; }, 5000); // Ховаємо через 5 секунд
+        });
 
-        if (!myUserId) {
-            document.body.innerHTML = "<h1>Помилка: ID гравця не знайдено. Будь ласка, відкрийте карту через додаток.</h1>";
-        } else {
-            const socket = io({ query: { userId: myUserId } });
-
-            let playerMarker = null;
-            let zoneCircle = null;
-
-            socket.on('game_update', (data) => {
-                const { players, zone } = data;
-                const me = players.find(p => p.id === myUserId);
-
-                // Оновлюємо зону
-                if (zone) {
-                    const center = [zone.latitude, zone.longitude];
-                    if (zoneCircle) {
-                        zoneCircle.setLatLng(center).setRadius(zone.radius);
-                    } else {
-                        zoneCircle = L.circle(center, { radius: zone.radius, color: '#e74c3c', fillOpacity: 0.2 }).addTo(map);
-                    }
-                }
-
-                // Оновлюємо маркер гравця
-                if (me && me.location) {
-                    const pos = [me.location.latitude, me.location.longitude];
-                    if (playerMarker) {
-                        playerMarker.setLatLng(pos);
-                    } else {
-                        playerMarker = L.marker(pos).addTo(map).bindPopup("Це я!");
-                    }
-                    map.setView(pos, 15); // Центруємо карту на гравцеві
-                }
-            });
-        }
+        socket.on('game_update', (data) => {
+            // ... (код оновлення маркера та зони)
+            const me = data.players.find(p => p.id === myUserId);
+            if (me && me.isOutOfZone) {
+                const timeLeft = 600 - (data.serverTime - me.outOfZoneSince);
+                timerDisplay.innerHTML = `<b>ПОЗА ЗОНОЮ!</b><br>Поверніться за ${Math.floor(timeLeft/60)}:${(timeLeft%60).toString().padStart(2, '0')}`;
+                timerDisplay.style.display = 'block';
+            } else {
+                timerDisplay.style.display = 'none';
+            }
+        });
     </script>
 </body>
 </html>

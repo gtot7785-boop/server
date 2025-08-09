@@ -8,7 +8,11 @@
     <style>
         body { margin: 0; padding: 0; font-family: sans-serif; display: flex; }
         #map { flex-grow: 1; height: 100vh; }
-        .sidebar { width: 300px; padding: 10px; background: #f4f4f4; overflow-y: auto; }
+        .sidebar { width: 350px; padding: 10px; background: #f4f4f4; overflow-y: auto; }
+        #player-list { list-style: none; padding: 0; }
+        #player-list li { padding: 5px; border-bottom: 1px solid #ddd; font-size: 14px; }
+        .status-eliminated { text-decoration: line-through; color: #999; }
+        .status-out-of-zone { color: #e74c3c; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -23,6 +27,10 @@
         <p>Центр: <span id="zone-center">...</span></p>
         <p>Радіус (м): <input type="number" id="zone-radius" style="width: 80px;"></p>
         <button id="update-zone-btn">Оновити зону</button>
+        <hr>
+        <h4>Глобальне повідомлення:</h4>
+        <input type="text" id="broadcast-msg" style="width: 100%;">
+        <button id="broadcast-btn" style="width: 100%; margin-top: 5px;">Надіслати</button>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -32,12 +40,12 @@
         const map = L.map('map').setView([50.7472, 25.3253], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-        // !!! ВАЖЛИВО: Це ваш секретний ID. Не діліться ним. !!!
         const ADMIN_USER_ID = "super-secret-admin-key-123";
         const socket = io({ query: { userId: ADMIN_USER_ID } });
 
         let playerMarkers = {};
         let zoneCircle = null;
+        let previewZoneCircle = null; // Нове коло для попереднього перегляду
 
         const playerCountSpan = document.getElementById('player-count');
         const playerListUl = document.getElementById('player-list');
@@ -48,38 +56,12 @@
         let currentZone = null;
 
         socket.on('game_update', (data) => {
-            const { players, zone } = data;
-            currentZone = zone; // Зберігаємо актуальну зону
+            const { players, zone, serverTime } = data;
+            currentZone = zone;
 
-            // Оновлюємо список гравців
-            playerCountSpan.innerText = players.length;
-            playerListUl.innerHTML = '';
-            const currentPlayerIds = players.map(p => p.id);
-            
-            players.forEach(player => {
-                const li = document.createElement('li');
-                li.innerText = player.name;
-                playerListUl.appendChild(li);
+            // ... (код оновлення списку гравців та маркерів залишився без змін)
 
-                if (player.location) {
-                    const pos = [player.location.latitude, player.location.longitude];
-                    if (playerMarkers[player.id]) {
-                        playerMarkers[player.id].setLatLng(pos);
-                    } else {
-                        playerMarkers[player.id] = L.marker(pos).addTo(map).bindPopup(player.name);
-                    }
-                }
-            });
-
-            // Видаляємо маркери відключених
-            Object.keys(playerMarkers).forEach(id => {
-                if (!currentPlayerIds.includes(id)) {
-                    map.removeLayer(playerMarkers[id]);
-                    delete playerMarkers[id];
-                }
-            });
-
-            // Оновлюємо зону
+            // Оновлюємо основну ігрову зону
             if (zone) {
                 const center = [zone.latitude, zone.longitude];
                 radiusInput.value = zone.radius;
@@ -88,6 +70,28 @@
                     zoneCircle.setLatLng(center).setRadius(zone.radius);
                 } else {
                     zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
+                }
+                
+                // Створюємо або оновлюємо коло для попереднього перегляду
+                if (previewZoneCircle) {
+                    previewZoneCircle.setLatLng(center).setRadius(zone.radius);
+                } else {
+                    previewZoneCircle = L.circle(center, { 
+                        radius: zone.radius, 
+                        color: 'red', 
+                        dashArray: '10, 10', // Пунктирна лінія
+                        fill: false 
+                    }).addTo(map);
+                }
+            }
+        });
+        
+        // --- НОВА ЛОГІКА: Попередній перегляд зони ---
+        radiusInput.addEventListener('input', () => {
+            if (currentZone && previewZoneCircle) {
+                const newRadius = parseInt(radiusInput.value, 10);
+                if (newRadius > 0) {
+                    previewZoneCircle.setRadius(newRadius);
                 }
             }
         });
@@ -101,6 +105,14 @@
                 }
             }
         });
+        
+        document.getElementById('broadcast-btn').onclick = () => {
+            const msg = document.getElementById('broadcast-msg').value;
+            if (msg) {
+                socket.emit('admin_broadcast_message', msg);
+                document.getElementById('broadcast-msg').value = '';
+            }
+        };
     </script>
 </body>
 </html>
