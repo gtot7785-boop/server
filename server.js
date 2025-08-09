@@ -80,17 +80,20 @@ setInterval(() => {
 
 io.on('connection', (socket) => {
     const { userId, isBeacon } = socket.handshake.query;
-    if (!userId) return socket.disconnect();
+    if (!userId) {
+        console.log('[ПОМИЛКА] Підключення без userId. Відключено.');
+        return socket.disconnect();
+    }
 
     if (isBeacon) {
         console.log(`[Сервер] Маячок підключився: UserID ${userId}`);
         
-        // !!! ОСНОВНЕ ВИПРАВЛЕННЯ: Якщо гравець перепідключився, а на сервері його немає, створюємо його заново !!!
+        // !!! ОСНОВНЕ ВИПРАВЛЕННЯ: Гарантуємо, що об'єкт гравця існує !!!
         if (!players[userId]) {
-            console.log(`[Сервер] Гравець ${userId} перепідключився. Створюємо об'єкт...`);
+            console.log(`[Сервер] Гравець ${userId} не знайдений (можливо, перепідключився). Створюємо новий об'єкт...`);
             players[userId] = {
                 id: userId,
-                name: userId.replace('user-', ''), // Витягуємо ім'я з ID
+                name: userId.replace('user-', ''),
                 location: null,
                 isOutOfZone: false,
                 outOfZoneSince: null,
@@ -98,31 +101,56 @@ io.on('connection', (socket) => {
             };
         }
         
-        players[userId].beaconSocketId = socket.id; // Тепер ця команда безпечна
+        // Тепер ця команда безпечна
+        players[userId].beaconSocketId = socket.id;
 
         socket.on('update_location', (locationData) => {
             if (players[userId]) {
                 players[userId].location = locationData;
                 updateViewers();
+            } else {
+                console.error(`[ПОМИЛКА] Отримано локацію для неіснуючого гравця: ${userId}`);
             }
         });
     } else {
         // Логіка для веб-глядачів (гравці та адмін)
         if (userId === ADMIN_USER_ID) {
-            socket.on('admin_update_zone', (newZone) => { /* ... */ });
-            socket.on('admin_eliminate_player', (playerId) => { /* ... */ });
-            socket.on('admin_broadcast_message', (message) => { /* ... */ });
+            socket.on('admin_update_zone', (newZone) => {
+                gameZone = newZone;
+                broadcastEvent('Адміністратор оновив ігровву зону!');
+                updateViewers();
+            });
+            socket.on('admin_eliminate_player', (playerId) => {
+                if (players[playerId]) {
+                    players[playerId].eliminated = true;
+                    broadcastEvent(`Гравець ${players[playerId].name} був виключений адміном!`);
+                    updateViewers();
+                }
+            });
+            socket.on('admin_broadcast_message', (message) => {
+                broadcastEvent(`[ОГОЛОШЕННЯ] ${message}`);
+            });
         }
     }
     
-    socket.on('register', ({ username, password }, callback) => { /* ... */ });
+    socket.on('register', ({ username, password }, callback) => {
+        if (users[username]) {
+            return callback({ success: false, message: 'Користувач з таким іменем вже існує' });
+        }
+        users[username] = password;
+        console.log(`[Реєстрація] Новий користувач: ${username}`);
+        callback({ success: true });
+    });
+
     socket.on('login', ({ username, password }, callback) => {
         if (users[username] && users[username] === password) {
             const newUserId = `user-${username}`;
-            players[newUserId] = {
-                id: newUserId, name: username, location: null, isOutOfZone: false,
-                outOfZoneSince: null, eliminated: false,
-            };
+            if (!players[newUserId]) {
+                players[newUserId] = {
+                    id: newUserId, name: username, location: null, isOutOfZone: false,
+                    outOfZoneSince: null, eliminated: false,
+                };
+            }
             console.log(`[Вхід] Користувач ${username} увійшов в систему.`);
             callback({ success: true, userId: newUserId });
             updateViewers();
@@ -134,10 +162,13 @@ io.on('connection', (socket) => {
     updateViewers();
 
     socket.on('disconnect', () => {
+        // Перевіряємо, чи існує гравець, перш ніж звертатися до його властивостей
         if (players[userId]) {
+            console.log(`[Сервер] Відключився сокет для гравця ${players[userId].name}`);
             delete players[userId].beaconSocketId;
+        } else {
+            console.log(`[Сервер] Відключився невідомий сокет з userId: ${userId}`);
         }
-        updateViewers();
     });
 });
 
@@ -156,6 +187,8 @@ function updateViewers() {
         } else if (players[userId]) {
             const playerData = { ...fullData, players: [players[userId]] };
             socket.emit('game_update', playerData);
+        } else {
+            socket.emit('game_update', { players: [], zone: gameZone, serverTime: now });
         }
     });
 }
