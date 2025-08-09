@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Моя карта</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background: #333; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+    <script>
+        const map = L.map('map', { zoomControl: false }).setView([50.7472, 25.3253], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const myUserId = urlParams.get('userId');
+
+        if (!myUserId) {
+            document.body.innerHTML = "<h1>Помилка: ID гравця не знайдено. Будь ласка, відкрийте карту через додаток.</h1>";
+        } else {
+            const socket = io({ query: { userId: myUserId } });
+
+            let playerMarker = null;
+            let zoneCircle = null;
+
+            socket.on('game_update', (data) => {
+                const { players, zone } = data;
+                const me = players.find(p => p.id === myUserId);
+
+                // Оновлюємо зону
+                if (zone) {
+                    const center = [zone.latitude, zone.longitude];
+                    if (zoneCircle) {
+                        zoneCircle.setLatLng(center).setRadius(zone.radius);
+                    } else {
+                        zoneCircle = L.circle(center, { radius: zone.radius, color: '#e74c3c', fillOpacity: 0.2 }).addTo(map);
+                    }
+                }
+
+                // Оновлюємо маркер гравця
+                if (me && me.location) {
+                    const pos = [me.location.latitude, me.location.longitude];
+                    if (playerMarker) {
+                        playerMarker.setLatLng(pos);
+                    } else {
+                        playerMarker = L.marker(pos).addTo(map).bindPopup("Це я!");
+                    }
+                    map.setView(pos, 15); // Центруємо карту на гравцеві
+                }
+            });
+        }
+    </script>
+</body>
+</html>
