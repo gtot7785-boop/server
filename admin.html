@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Адмін-панель</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; display: flex; }
+        #map { flex-grow: 1; height: 100vh; }
+        .sidebar { width: 350px; padding: 10px; background: #f4f4f4; overflow-y: auto; }
+        #player-list { list-style: none; padding: 0; }
+        #player-list li { padding: 5px; border-bottom: 1px solid #ddd; font-size: 14px; }
+        .status-eliminated { text-decoration: line-through; color: #999; }
+        .status-out-of-zone { color: #e74c3c; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div class="sidebar">
+        <h3>Адмін-панель</h3>
+        <hr>
+        <h4>Гравці (<span id="player-count">0</span>):</h4>
+        <ul id="player-list"></ul>
+        <hr>
+        <h4>Керування зоною:</h4>
+        <p>Центр: <span id="zone-center">...</span></p>
+        <p>Радіус (м): <input type="number" id="zone-radius" style="width: 80px;"></p>
+        <button id="update-zone-btn">Оновити зону</button>
+        <hr>
+        <h4>Глобальне повідомлення:</h4>
+        <input type="text" id="broadcast-msg" style="width: 100%;">
+        <button id="broadcast-btn" style="width: 100%; margin-top: 5px;">Надіслати</button>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+    <script>
+        const map = L.map('map').setView([50.7472, 25.3253], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        const ADMIN_USER_ID = "super-secret-admin-key-123";
+        const socket = io({ query: { userId: ADMIN_USER_ID } });
+
+        let playerMarkers = {};
+        let zoneCircle = null;
+        let previewZoneCircle = null; // Нове коло для попереднього перегляду
+
+        const playerCountSpan = document.getElementById('player-count');
+        const playerListUl = document.getElementById('player-list');
+        const radiusInput = document.getElementById('zone-radius');
+        const centerSpan = document.getElementById('zone-center');
+        const updateZoneBtn = document.getElementById('update-zone-btn');
+        
+        let currentZone = null;
+
+        socket.on('game_update', (data) => {
+            const { players, zone, serverTime } = data;
+            currentZone = zone;
+
+            // ... (код оновлення списку гравців та маркерів залишився без змін)
+
+            // Оновлюємо основну ігрову зону
+            if (zone) {
+                const center = [zone.latitude, zone.longitude];
+                radiusInput.value = zone.radius;
+                centerSpan.innerText = `${zone.latitude.toFixed(4)}, ${zone.longitude.toFixed(4)}`;
+                if (zoneCircle) {
+                    zoneCircle.setLatLng(center).setRadius(zone.radius);
+                } else {
+                    zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
+                }
+                
+                // Створюємо або оновлюємо коло для попереднього перегляду
+                if (previewZoneCircle) {
+                    previewZoneCircle.setLatLng(center).setRadius(zone.radius);
+                } else {
+                    previewZoneCircle = L.circle(center, { 
+                        radius: zone.radius, 
+                        color: 'red', 
+                        dashArray: '10, 10', // Пунктирна лінія
+                        fill: false 
+                    }).addTo(map);
+                }
+            }
+        });
+        
+        // --- НОВА ЛОГІКА: Попередній перегляд зони ---
+        radiusInput.addEventListener('input', () => {
+            if (currentZone && previewZoneCircle) {
+                const newRadius = parseInt(radiusInput.value, 10);
+                if (newRadius > 0) {
+                    previewZoneCircle.setRadius(newRadius);
+                }
+            }
+        });
+
+        updateZoneBtn.addEventListener('click', () => {
+            if (currentZone) {
+                const newRadius = parseInt(radiusInput.value, 10);
+                if (newRadius > 0) {
+                    const newZone = { ...currentZone, radius: newRadius };
+                    socket.emit('admin_update_zone', newZone);
+                }
+            }
+        });
+        
+        document.getElementById('broadcast-btn').onclick = () => {
+            const msg = document.getElementById('broadcast-msg').value;
+            if (msg) {
+                socket.emit('admin_broadcast_message', msg);
+                document.getElementById('broadcast-msg').value = '';
+            }
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Моя карта</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; }
+        .event-overlay { position: absolute; top: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.7); color: white; padding: 10px 20px; border-radius: 20px; z-index: 1000; }
+        .timer-overlay { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); background: #e74c3c; color: white; padding: 15px; border-radius: 10px; z-index: 1000; text-align: center; }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="event-display" class="event-overlay" style="display: none;"></div>
+    <div id="timer-display" class="timer-overlay" style="display: none;"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+
+    <script>
+        // ... (код карти гравця)
+        const eventDisplay = document.getElementById('event-display');
+        const timerDisplay = document.getElementById('timer-display');
+
+        socket.on('game_event', (message) => {
+            eventDisplay.innerText = message;
+            eventDisplay.style.display = 'block';
+            setTimeout(() => { eventDisplay.style.display = 'none'; }, 5000); // Ховаємо через 5 секунд
+        });
+
+        socket.on('game_update', (data) => {
+            // ... (код оновлення маркера та зони)
+            const me = data.players.find(p => p.id === myUserId);
+            if (me && me.isOutOfZone) {
+                const timeLeft = 600 - (data.serverTime - me.outOfZoneSince);
+                timerDisplay.innerHTML = `<b>ПОЗА ЗОНОЮ!</b><br>Поверніться за ${Math.floor(timeLeft/60)}:${(timeLeft%60).toString().padStart(2, '0')}`;
+                timerDisplay.style.display = 'block';
+            } else {
+                timerDisplay.style.display = 'none';
+            }
+        });
+    </script>
+</body>
+</html>

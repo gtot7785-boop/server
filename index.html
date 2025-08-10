@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Карта гри "Хованки"</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { height: 100vh; width: 100vw; }
+        .info-panel { position: absolute; top: 10px; right: 10px; background: white; padding: 10px; border-radius: 8px; z-index: 1000; max-height: 80vh; overflow-y: auto; }
+        .player-me { font-weight: bold; color: #2980b9; }
+    </style>
+</head>
+<body>
+
+    <div id="map"></div>
+    <div class="info-panel">
+        <h3>Гравці онлайн: <span id="player-count">0</span></h3>
+        <ul id="player-list"></ul>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
+
+    <script>
+        // Ініціалізуємо карту
+        const map = L.map('map').setView([50.7472, 25.3253], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap'
+        }).addTo(map);
+
+        // Отримуємо наш ID з URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const myUserId = urlParams.get('userId');
+        if (!myUserId) {
+            alert('Помилка: ID користувача не знайдено. Будь ласка, відкрийте гру через мобільний додаток.');
+        }
+
+        // Підключаємось до сервера, передаючи наш ID
+        const socket = io({ query: { userId: myUserId } });
+
+        let playerMarkers = {};
+        const playerCountSpan = document.getElementById('player-count');
+        const playerListUl = document.getElementById('player-list');
+
+        socket.on('game_update', (data) => {
+            const { players, zone } = data;
+            
+            playerCountSpan.innerText = players.length;
+            playerListUl.innerHTML = '';
+            const currentPlayerIds = [];
+
+            players.forEach(player => {
+                currentPlayerIds.push(player.id);
+                
+                const li = document.createElement('li');
+                li.innerText = player.name;
+                if (player.id === myUserId) {
+                    li.classList.add('player-me');
+                }
+                playerListUl.appendChild(li);
+
+                if (player.location) {
+                    const { latitude, longitude } = player.location;
+                    const isMe = player.id === myUserId;
+                    
+                    if (playerMarkers[player.id]) {
+                        playerMarkers[player.id].setLatLng([latitude, longitude]);
+                    } else {
+                        const iconColor = isMe ? '#2980b9' : '#e74c3c';
+                        const marker = L.marker([latitude, longitude], {
+                            icon: L.divIcon({
+                                className: 'player-marker',
+                                html: `<div style="background-color: ${iconColor}; width: 15px; height: 15px; border-radius: 50%; border: 2px solid white;"></div>`,
+                                iconSize: [15, 15]
+                            })
+                        }).addTo(map).bindPopup(player.name);
+                        playerMarkers[player.id] = marker;
+                    }
+                }
+            });
+
+            // Видаляємо маркери гравців, які відключилися
+            for (const playerId in playerMarkers) {
+                if (!currentPlayerIds.includes(playerId)) {
+                    map.removeLayer(playerMarkers[playerId]);
+                    delete playerMarkers[playerId];
+                }
+            }
+        });
+    </script>
+</body>
+</html>
