@@ -82,8 +82,14 @@ io.on('connection', (socket) => {
     const { userId, isBeacon } = socket.handshake.query;
     console.log(`[Connect] Нове підключення. UserID: ${userId || 'N/A'}, isBeacon: ${isBeacon}`);
 
-    if (isBeacon && userId && players[userId]) {
-        console.log(`[Сервер] Маячок підключився: UserID ${userId}`);
+    if (isBeacon && userId) {
+        if (!players[userId]) {
+            players[userId] = {
+                id: userId,
+                name: userId.includes('user-') ? userId.replace('user-', '') : `Гравець ${userId.substring(0, 4)}`,
+                location: null, isOutOfZone: false, outOfZoneSince: null, eliminated: false,
+            };
+        }
         players[userId].beaconSocketId = socket.id;
 
         socket.on('update_location', (locationData) => {
@@ -170,10 +176,9 @@ function updateViewers() {
     });
 }
 
-// Додаємо обробник помилок, щоб уникнути "падіння" сервера
 server.on('error', (err) => {
     if (err.code === 'EADDRINUSE') {
-        console.error(`[ПОМИЛКА] Порт ${PORT} вже використовується. Можливо, інша копія сервера вже запущена.`);
+        console.error(`[ПОМИЛКА] Порт ${PORT} вже використовується.`);
     } else {
         console.error(`[ПОМИЛКА СЕРВЕРА] ${err}`);
     }
