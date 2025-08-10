@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "32211030919",
+    "project_id": "servers-fe83b",
+    "storage_bucket": "servers-fe83b.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:32211030919:android:bbf7bfcb8d4d36bd2c3922",
+        "android_client_info": {
+          "package_name": "com.hideandseekapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDOKN5n8e5DcFOM04cOp9s_8ByaENbKmMc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
