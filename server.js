@@ -3,14 +3,6 @@ const http = require('http');
 const { Server } = require("socket.io");
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
-const admin = require('firebase-admin');
-
-// !!! ВАЖЛИВО: Вкажіть тут назву вашого файлу з ключем від Firebase
-const serviceAccount = require('./servers-fe83b-firebase-adminsdk-fbsvc-e29b15f8e7.json');
-
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
-});
 
 const PORT = 8080;
 
@@ -56,8 +48,7 @@ io.on('connection', (socket) => {
             return callback({ success: false, message: 'Гра вже почалася.' });
         }
         const newPlayerId = uuidv4();
-        // Додаємо поле pushToken
-        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, eliminated: false, pushToken: null };
+        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, eliminated: false };
         currentUserId = newPlayerId;
         socket.join(newPlayerId);
         console.log(`[Join] Гравець '${playerName}' приєднався.`);
@@ -65,13 +56,6 @@ io.on('connection', (socket) => {
         broadcastLobbyUpdate();
     });
     
-    socket.on('register_push_token', (token) => {
-        if (currentUserId && players[currentUserId]) {
-            players[currentUserId].pushToken = token;
-            console.log(`[Push] Зареєстровано токен для гравця ${players[currentUserId].name}`);
-        }
-    });
-
     socket.on('update_location', (locationData) => {
         if (currentUserId && players[currentUserId]) {
             players[currentUserId].location = locationData;
@@ -88,19 +72,8 @@ io.on('connection', (socket) => {
 
     socket.on('admin_broadcast_message', (message) => {
         if (isAdmin === 'true') {
-            const tokens = Object.values(players)
-                .map(p => p.pushToken)
-                .filter(t => t);
-
-            if (tokens.length > 0) {
-                const pushMessage = {
-                    notification: { title: 'Повідомлення від Адміна', body: message },
-                    tokens: tokens,
-                };
-                admin.messaging().sendMulticast(pushMessage)
-                    .then((response) => console.log('[Push] Сповіщення успішно надіслано:', response.successCount))
-                    .catch((error) => console.error('[Push] Помилка надсилання сповіщень:', error));
-            }
+            // Просто надсилаємо подію гравцям
+            broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
         }
     });
 
