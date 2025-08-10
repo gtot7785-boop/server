@@ -6,7 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const admin = require('firebase-admin');
 
 // !!! ВАЖЛИВО: Вкажіть тут назву вашого файлу з ключем від Firebase
-const serviceAccount = require('./YOUR-FIREBASE-KEY-FILE.json');
+const serviceAccount = require('./servers-fe53b-firebase-adminsdk-tbzuc-e29b15f8e7.json');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
