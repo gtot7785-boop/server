@@ -2,7 +2,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require("socket.io");
 const path = require('path');
-const { v4: uuidv4 } = require('uuid'); // Будемо генерувати унікальні ID для гравців
+const { v4: uuidv4 } = require('uuid');
 
 const PORT = 8080;
 const ADMIN_USER_ID = "super-secret-admin-key-123";
@@ -11,22 +11,20 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// Обслуговуємо адмінку та карту гравця
+// !!! ВАЖЛИВЕ ДОПОВНЕННЯ: Додаємо обробник помилок для сервера
+server.on('error', (err) => {
+  console.error('[ПОМИЛКА СЕРВЕРА]:', err);
+});
+
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 app.get('/player.html', (req, res) => res.sendFile(path.join(__dirname, 'player.html')));
 
-// --- Стан гри ---
-let players = {}; // { userId: { id, name, location, ... } }
-let gameState = 'LOBBY'; // Можливі стани: 'LOBBY', 'IN_PROGRESS'
+let players = {};
+let gameState = 'LOBBY';
 
-// --- Ігровий цикл (запускається тільки коли гра в процесі) ---
 setInterval(() => {
     if (gameState !== 'IN_PROGRESS') return;
-    
-    // Тут буде логіка зони, коли ви її додасте.
-    // Зараз вона не виконується, поки гра не почалася.
-    
-    updateGameData(); // Регулярно надсилаємо оновлення під час гри
+    updateGameData();
 }, 2000);
 
 io.on('connection', (socket) => {
@@ -35,32 +33,25 @@ io.on('connection', (socket) => {
     if (isAdmin === 'true') {
         socket.join('admins');
         console.log(`[Connect] Адміністратор підключився.`);
-        // Надсилаємо адміну поточний стан при підключенні
         socket.emit('game_state_update', { gameState, players: Object.values(players) });
     }
 
-    // Нова подія для приєднання до гри
     socket.on('join_game', (playerName, callback) => {
         if (gameState !== 'LOBBY') {
             return callback({ success: false, message: 'Гра вже почалася.' });
         }
-        
-        const newPlayerId = uuidv4(); // Генеруємо унікальний ID
+        const newPlayerId = uuidv4();
         players[newPlayerId] = {
             id: newPlayerId,
             name: playerName,
             location: null,
             eliminated: false,
         };
-
         console.log(`[Join] Гравець '${playerName}' приєднався з ID: ${newPlayerId}`);
         callback({ success: true, userId: newPlayerId });
-        
-        // Оновлюємо інформацію для всіх
         broadcastLobbyUpdate();
     });
-    
-    // Коли гравець з додатку перепідключається
+
     if (userId && players[userId]) {
         socket.join(userId);
         socket.on('update_location', (locationData) => {
@@ -70,16 +61,15 @@ io.on('connection', (socket) => {
         });
     }
 
-    // --- Адмін-команди ---
     socket.on('admin_start_game', () => {
         if (gameState === 'LOBBY') {
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
-            io.emit('game_started'); // Повідомляємо всім клієнтам, що гра почалася
-            broadcastLobbyUpdate(); // Останнє оновлення лобі
+            io.emit('game_started');
+            broadcastLobbyUpdate();
         }
     });
-    
+
     socket.on('admin_reset_game', () => {
         players = {};
         gameState = 'LOBBY';
@@ -88,22 +78,22 @@ io.on('connection', (socket) => {
     });
 });
 
-// Функція для розсилки стану лобі
 function broadcastLobbyUpdate() {
     io.emit('game_state_update', { gameState, players: Object.values(players) });
 }
 
-// Функція для розсилки ігрових даних (положення на карті)
 function updateGameData() {
     const dataForAdmin = { gameState, players: Object.values(players) };
     io.to('admins').emit('game_state_update', dataForAdmin);
-
     for (const pId in players) {
         const playerData = {
             gameState,
-            players: [players[pId]], // Гравець бачить тільки себе
-            // ... можна додати інфу про зону
+            players: [players[pId]],
         };
         io.to(pId).emit('game_update', playerData);
     }
 }
+
+server.listen(PORT, '0.0.0.0', () => {
+    console.log(`[Сервер] Сервер успішно запущено на порті ${PORT}`);
+});
