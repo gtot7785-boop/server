@@ -5,13 +5,11 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 const PORT = 8080;
-const ADMIN_USER_ID = "super-secret-admin-key-123";
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: "*" } });
 
-// !!! ВАЖЛИВЕ ДОПОВНЕННЯ: Додаємо обробник помилок для сервера
 server.on('error', (err) => {
   console.error('[ПОМИЛКА СЕРВЕРА]:', err);
 });
@@ -28,7 +26,10 @@ setInterval(() => {
 }, 2000);
 
 io.on('connection', (socket) => {
-    const { userId, isAdmin } = socket.handshake.query;
+    // Зберігаємо userId, пов'язаний з цим сокетом, для подальшого використання
+    let currentUserId = null; 
+
+    const { isAdmin } = socket.handshake.query;
 
     if (isAdmin === 'true') {
         socket.join('admins');
@@ -40,26 +41,28 @@ io.on('connection', (socket) => {
         if (gameState !== 'LOBBY') {
             return callback({ success: false, message: 'Гра вже почалася.' });
         }
+        
         const newPlayerId = uuidv4();
         players[newPlayerId] = {
             id: newPlayerId,
             name: playerName,
+            socketId: socket.id, // !!! Зберігаємо ID сокета гравця
             location: null,
             eliminated: false,
         };
+
+        currentUserId = newPlayerId; // Запам'ятовуємо, хто підключився
+        socket.join(newPlayerId);
         console.log(`[Join] Гравець '${playerName}' приєднався з ID: ${newPlayerId}`);
         callback({ success: true, userId: newPlayerId });
         broadcastLobbyUpdate();
     });
 
-    if (userId && players[userId]) {
-        socket.join(userId);
-        socket.on('update_location', (locationData) => {
-            if (players[userId]) {
-                players[userId].location = locationData;
-            }
-        });
-    }
+    socket.on('update_location', (locationData) => {
+        if (currentUserId && players[currentUserId]) {
+            players[currentUserId].location = locationData;
+        }
+    });
 
     socket.on('admin_start_game', () => {
         if (gameState === 'LOBBY') {
@@ -69,12 +72,21 @@ io.on('connection', (socket) => {
             broadcastLobbyUpdate();
         }
     });
-
+    
     socket.on('admin_reset_game', () => {
         players = {};
         gameState = 'LOBBY';
         console.log('[Admin] Гра скинута до стану лобі.');
         broadcastLobbyUpdate();
+    });
+    
+    // !!! ОСНОВНА ЗМІНА: Обробляємо відключення
+    socket.on('disconnect', () => {
+        if (currentUserId && players[currentUserId]) {
+            console.log(`[Disconnect] Гравець '${players[currentUserId].name}' відключився.`);
+            delete players[currentUserId]; // Видаляємо гравця зі списку
+            broadcastLobbyUpdate(); // Оновлюємо лобі для всіх
+        }
     });
 });
 
