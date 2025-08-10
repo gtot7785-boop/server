@@ -8,29 +8,21 @@
     <style>
         body { margin: 0; padding: 0; font-family: sans-serif; display: flex; }
         #map { flex-grow: 1; height: 100vh; }
-        .sidebar { width: 350px; padding: 10px; background: #f4f4f4; overflow-y: auto; }
+        .sidebar { width: 350px; padding: 10px; background: #f4f4f4; overflow-y: auto; box-sizing: border-box; }
         #player-list { list-style: none; padding: 0; }
         #player-list li { padding: 5px; border-bottom: 1px solid #ddd; font-size: 14px; }
-        .status-eliminated { text-decoration: line-through; color: #999; }
-        .status-out-of-zone { color: #e74c3c; font-weight: bold; }
     </style>
 </head>
 <body>
     <div id="map"></div>
     <div class="sidebar">
         <h3>Адмін-панель</h3>
+        <p>Статус гри: <b id="game-status">...</b></p>
+        <button id="start-game-btn" style="width: 100%; margin-bottom: 5px; padding: 10px; background-color: #28a745; color: white; border: none; cursor: pointer;">Розпочати гру</button>
+        <button id="reset-game-btn" style="width: 100%; padding: 10px; background-color: #dc3545; color: white; border: none; cursor: pointer;">Скинути гру (нове лобі)</button>
         <hr>
         <h4>Гравці (<span id="player-count">0</span>):</h4>
         <ul id="player-list"></ul>
-        <hr>
-        <h4>Керування зоною:</h4>
-        <p>Центр: <span id="zone-center">...</span></p>
-        <p>Радіус (м): <input type="number" id="zone-radius" style="width: 80px;"></p>
-        <button id="update-zone-btn">Оновити зону</button>
-        <hr>
-        <h4>Глобальне повідомлення:</h4>
-        <input type="text" id="broadcast-msg" style="width: 100%;">
-        <button id="broadcast-btn" style="width: 100%; margin-top: 5px;">Надіслати</button>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -40,79 +32,38 @@
         const map = L.map('map').setView([50.7472, 25.3253], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
-        const ADMIN_USER_ID = "super-secret-admin-key-123";
-        const socket = io({ query: { userId: ADMIN_USER_ID } });
+        const socket = io({ query: { isAdmin: 'true' } });
 
-        let playerMarkers = {};
-        let zoneCircle = null;
-        let previewZoneCircle = null; // Нове коло для попереднього перегляду
-
+        const gameStatusEl = document.getElementById('game-status');
         const playerCountSpan = document.getElementById('player-count');
         const playerListUl = document.getElementById('player-list');
-        const radiusInput = document.getElementById('zone-radius');
-        const centerSpan = document.getElementById('zone-center');
-        const updateZoneBtn = document.getElementById('update-zone-btn');
+        const startGameBtn = document.getElementById('start-game-btn');
+        const resetGameBtn = document.getElementById('reset-game-btn');
+
+        startGameBtn.onclick = () => socket.emit('admin_start_game');
         
-        let currentZone = null;
-
-        socket.on('game_update', (data) => {
-            const { players, zone, serverTime } = data;
-            currentZone = zone;
-
-            // ... (код оновлення списку гравців та маркерів залишився без змін)
-
-            // Оновлюємо основну ігрову зону
-            if (zone) {
-                const center = [zone.latitude, zone.longitude];
-                radiusInput.value = zone.radius;
-                centerSpan.innerText = `${zone.latitude.toFixed(4)}, ${zone.longitude.toFixed(4)}`;
-                if (zoneCircle) {
-                    zoneCircle.setLatLng(center).setRadius(zone.radius);
-                } else {
-                    zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
-                }
-                
-                // Створюємо або оновлюємо коло для попереднього перегляду
-                if (previewZoneCircle) {
-                    previewZoneCircle.setLatLng(center).setRadius(zone.radius);
-                } else {
-                    previewZoneCircle = L.circle(center, { 
-                        radius: zone.radius, 
-                        color: 'red', 
-                        dashArray: '10, 10', // Пунктирна лінія
-                        fill: false 
-                    }).addTo(map);
-                }
-            }
-        });
-        
-        // --- НОВА ЛОГІКА: Попередній перегляд зони ---
-        radiusInput.addEventListener('input', () => {
-            if (currentZone && previewZoneCircle) {
-                const newRadius = parseInt(radiusInput.value, 10);
-                if (newRadius > 0) {
-                    previewZoneCircle.setRadius(newRadius);
-                }
-            }
-        });
-
-        updateZoneBtn.addEventListener('click', () => {
-            if (currentZone) {
-                const newRadius = parseInt(radiusInput.value, 10);
-                if (newRadius > 0) {
-                    const newZone = { ...currentZone, radius: newRadius };
-                    socket.emit('admin_update_zone', newZone);
-                }
-            }
-        });
-        
-        document.getElementById('broadcast-btn').onclick = () => {
-            const msg = document.getElementById('broadcast-msg').value;
-            if (msg) {
-                socket.emit('admin_broadcast_message', msg);
-                document.getElementById('broadcast-msg').value = '';
+        resetGameBtn.onclick = () => {
+            if (confirm('Ви впевнені, що хочете скинути гру? Всі гравці будуть видалені з лобі.')) {
+                socket.emit('admin_reset_game');
             }
         };
+
+        socket.on('game_state_update', (data) => {
+            const { gameState, players } = data;
+            
+            gameStatusEl.innerText = gameState;
+            startGameBtn.disabled = gameState === 'IN_PROGRESS';
+            
+            playerCountSpan.innerText = players.length;
+            playerListUl.innerHTML = ''; // Очищуємо список перед оновленням
+            players.forEach(player => {
+                const li = document.createElement('li');
+                li.innerText = `${player.name} (ID: ${player.id.substring(0, 6)}...)`;
+                playerListUl.appendChild(li);
+            });
+            
+            // Тут можна буде додати логіку відображення гравців на карті
+        });
     </script>
 </body>
 </html>
