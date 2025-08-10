@@ -1,129 +1,142 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Адмін-панель</title>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; display: flex; }
-        #map { flex-grow: 1; height: 100vh; }
-        .sidebar { width: 350px; padding: 10px; background: #f4f4f4; overflow-y: auto; box-sizing: border-box; }
-        .game-controls { display: none; }
-        #player-list { list-style: none; padding: 0; }
-        #player-list li { padding: 5px; border-bottom: 1px solid #ddd; font-size: 14px; }
-    </style>
-</head>
-<body>
-    <div id="map"></div>
-    <div class="sidebar">
-        <h3>Адмін-панель</h3>
-        <p>Статус гри: <b id="game-status">...</b></p>
-        <button id="start-game-btn" style="width:100%;padding:8px;background-color:#28a745;color:white;border:none;cursor:pointer;">Розпочати гру</button>
-        <button id="reset-game-btn" style="width:100%;margin-top:5px;padding:8px;background-color:#dc3545;color:white;border:none;cursor:pointer;">Скинути гру</button>
-        <hr>
-        <div id="game-controls" class="game-controls">
-            <h4>Керування зоною:</h4>
-            <p>Радіус (м): <input type="number" id="zone-radius" style="width: 80px;"></p>
-            <button id="update-zone-btn">Оновити зону</button>
-            <hr>
-            <h4>Глобальне повідомлення:</h4>
-            <input type="text" id="broadcast-msg" style="width: 100%;">
-            <button id="broadcast-btn" style="width: 100%; margin-top: 5px;">Надіслати</button>
-            <hr>
-        </div>
-        <h4>Гравці (<span id="player-count">0</span>):</h4>
-        <ul id="player-list"></ul>
-    </div>
+const express = require('express');
+const http = require('http');
+const { Server } = require("socket.io");
+const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+const PORT = 8080;
 
-    <script>
-        const map = L.map('map').setView([50.7472, 25.3253], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+const app = express();
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
 
-        const socket = io({ query: { isAdmin: 'true' } });
+server.on('error', (err) => console.error('[ПОМИЛКА СЕРВЕРА]:', err));
 
-        const gameStatusEl = document.getElementById('game-status');
-        const playerCountSpan = document.getElementById('player-count');
-        const playerListUl = document.getElementById('player-list');
-        const startGameBtn = document.getElementById('start-game-btn');
-        const resetGameBtn = document.getElementById('reset-game-btn');
-        const gameControls = document.getElementById('game-controls');
-        const updateZoneBtn = document.getElementById('update-zone-btn');
-        const radiusInput = document.getElementById('zone-radius');
-        const broadcastBtn = document.getElementById('broadcast-btn');
-        const broadcastMsg = document.getElementById('broadcast-msg');
+app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
+app.get('/player.html', (req, res) => res.sendFile(path.join(__dirname, 'player.html')));
 
-        let currentZone = null;
-        let zoneCircle = null;
-        let playerMarkers = {};
+let players = {};
+let gameState = 'LOBBY';
+let gameZone = {
+  latitude: 50.7472,
+  longitude: 25.3253,
+  radius: 5000,
+};
 
-        startGameBtn.onclick = () => socket.emit('admin_start_game');
-        resetGameBtn.onclick = () => {
-            if (confirm('Ви впевнені, що хочете скинути гру? Всі гравці будуть видалені.')) {
-                socket.emit('admin_reset_game');
+setInterval(() => {
+    if (gameState !== 'IN_PROGRESS') return;
+    updateGameData();
+}, 2000);
+
+io.on('connection', (socket) => {
+    const { isAdmin, userId: restoredUserId } = socket.handshake.query;
+    let currentUserId = restoredUserId || null;
+
+    if (isAdmin === 'true') {
+        socket.join('admins');
+        console.log(`[Connect] Адміністратор підключився.`);
+        socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+    }
+
+    if (currentUserId && players[currentUserId]) {
+        players[currentUserId].socketId = socket.id;
+        socket.join(currentUserId);
+    }
+
+    socket.on('join_game', (playerName, callback) => {
+        if (gameState !== 'LOBBY') {
+            return callback({ success: false, message: 'Гра вже почалася.' });
+        }
+        const newPlayerId = uuidv4();
+        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, eliminated: false };
+        currentUserId = newPlayerId;
+        socket.join(newPlayerId);
+        console.log(`[Join] Гравець '${playerName}' приєднався.`);
+        callback({ success: true, userId: newPlayerId });
+        broadcastLobbyUpdate();
+    });
+
+    socket.on('update_location', (locationData) => {
+        if (currentUserId && players[currentUserId]) {
+            players[currentUserId].location = locationData;
+        }
+    });
+
+    socket.on('admin_update_zone', (newZone) => {
+        if (isAdmin === 'true') {
+            gameZone = newZone;
+            broadcastToPlayers('game_event', '⚠️ Адміністратор оновив ігрову зону!');
+            broadcastLobbyUpdate(); // Оновлюємо адмінку теж
+        }
+    });
+
+    socket.on('admin_broadcast_message', (message) => {
+        if (isAdmin === 'true') {
+            broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
+        }
+    });
+
+    // !!! ВИПРАВЛЕНА ЛОГІКА
+    socket.on('admin_start_game', () => {
+        if (isAdmin === 'true' && gameState === 'LOBBY') {
+            gameState = 'IN_PROGRESS';
+            console.log('[Admin] Гру розпочато!');
+            io.emit('game_started'); // Повідомляємо всім, що гра почалася
+            broadcastLobbyUpdate();
+        }
+    });
+
+    // !!! ВИПРАВЛЕНА ЛОГІКА
+    socket.on('admin_reset_game', () => {
+        if (isAdmin === 'true') {
+            players = {};
+            gameState = 'LOBBY';
+            console.log('[Admin] Гра скинута до стану лобі.');
+            broadcastLobbyUpdate();
+            // Повідомляємо гравців, щоб вони повернулися в лобі
+            io.emit('game_reset');
+        }
+    });
+
+    socket.on('disconnect', () => {
+        // Шукаємо гравця за ID сокета, а не за currentUserId, бо це надійніше
+        let disconnectedPlayerId = null;
+        for (const pId in players) {
+            if (players[pId].socketId === socket.id) {
+                disconnectedPlayerId = pId;
+                break;
             }
+        }
+        if (disconnectedPlayerId && players[disconnectedPlayerId]) {
+            console.log(`[Disconnect] Гравець '${players[disconnectedPlayerId].name}' відключився.`);
+            delete players[disconnectedPlayerId];
+            broadcastLobbyUpdate();
+        }
+    });
+});
+
+function broadcastLobbyUpdate() {
+    io.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+}
+
+function broadcastToPlayers(event, data) {
+    Object.keys(players).forEach(pId => {
+        io.to(pId).emit(event, data);
+    });
+}
+
+function updateGameData() {
+    const dataForAdmin = { gameState, players: Object.values(players), zone: gameZone };
+    io.to('admins').emit('game_state_update', dataForAdmin);
+
+    for (const pId in players) {
+        const playerData = {
+            gameState,
+            players: [players[pId]],
+            zone: gameZone,
         };
-        updateZoneBtn.onclick = () => {
-            const newRadius = parseInt(radiusInput.value, 10);
-            if (currentZone && newRadius > 0) {
-                socket.emit('admin_update_zone', { ...currentZone, radius: newRadius });
-            }
-        };
-        broadcastBtn.onclick = () => {
-            if (broadcastMsg.value) {
-                socket.emit('admin_broadcast_message', broadcastMsg.value);
-                broadcastMsg.value = '';
-            }
-        };
+        io.to(pId).emit('game_update', playerData);
+    }
+}
 
-        socket.on('game_state_update', (data) => {
-            const { gameState, players, zone } = data;
-            currentZone = zone;
-
-            gameStatusEl.innerText = gameState;
-            startGameBtn.disabled = gameState === 'IN_PROGRESS';
-
-            gameControls.style.display = (gameState === 'IN_PROGRESS') ? 'block' : 'none';
-
-            playerCountSpan.innerText = players.length;
-            playerListUl.innerHTML = '';
-            const updatedPlayerIds = [];
-            players.forEach(player => {
-                updatedPlayerIds.push(player.id);
-                const li = document.createElement('li');
-                li.innerText = player.name;
-                playerListUl.appendChild(li);
-
-                if (player.location) {
-                    const latLng = [player.location.latitude, player.location.longitude];
-                    if (playerMarkers[player.id]) {
-                        playerMarkers[player.id].setLatLng(latLng);
-                    } else {
-                        playerMarkers[player.id] = L.marker(latLng).addTo(map).bindPopup(player.name);
-                    }
-                }
-            });
-
-            for (const pId in playerMarkers) {
-                if (!updatedPlayerIds.includes(pId)) {
-                    map.removeLayer(playerMarkers[pId]);
-                    delete playerMarkers[pId];
-                }
-            }
-
-            if (zone) {
-                radiusInput.value = zone.radius;
-                const center = [zone.latitude, zone.longitude];
-                if (zoneCircle) {
-                    zoneCircle.setLatLng(center).setRadius(zone.radius);
-                } else {
-                    zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
-                }
-            }
-        });
-    </script>
-</body>
-</html>
+server.listen(PORT, '0.0.0.0', () => console.log(`[Сервер] Сервер успішно запущено на порті ${PORT}`));
