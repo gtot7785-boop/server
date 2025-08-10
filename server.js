@@ -15,10 +15,8 @@ server.on('error', (err) => console.error('[ПОМИЛКА СЕРВЕРА]:', er
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')));
 app.get('/player.html', (req, res) => res.sendFile(path.join(__dirname, 'player.html')));
 
-// --- Стан гри ---
 let players = {};
 let gameState = 'LOBBY';
-// !!! Повертаємо об'єкт ігрової зони
 let gameZone = {
   latitude: 50.7472,
   longitude: 25.3253,
@@ -31,18 +29,16 @@ setInterval(() => {
 }, 2000);
 
 io.on('connection', (socket) => {
-    let currentUserId = null; 
     const { isAdmin, userId: restoredUserId } = socket.handshake.query;
+    let currentUserId = restoredUserId || null;
 
     if (isAdmin === 'true') {
         socket.join('admins');
         console.log(`[Connect] Адміністратор підключився.`);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     }
-    
-    // Якщо гравець перепідключається (наприклад, відкрив карту)
-    if (restoredUserId && players[restoredUserId]) {
-        currentUserId = restoredUserId;
+
+    if (currentUserId && players[currentUserId]) {
         players[currentUserId].socketId = socket.id;
         socket.join(currentUserId);
     }
@@ -66,11 +62,11 @@ io.on('connection', (socket) => {
         }
     });
 
-    // --- Нові адмін-команди ---
     socket.on('admin_update_zone', (newZone) => {
         if (isAdmin === 'true') {
             gameZone = newZone;
             broadcastToPlayers('game_event', '⚠️ Адміністратор оновив ігрову зону!');
+            broadcastLobbyUpdate(); // Оновлюємо адмінку теж
         }
     });
 
@@ -80,10 +76,30 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('admin_start_game', () => { /* ... без змін ... */ });
-    socket.on('admin_reset_game', () => { /* ... без змін ... */ });
+    // !!! ВИПРАВЛЕНА ЛОГІКА
+    socket.on('admin_start_game', () => {
+        if (isAdmin === 'true' && gameState === 'LOBBY') {
+            gameState = 'IN_PROGRESS';
+            console.log('[Admin] Гру розпочато!');
+            io.emit('game_started'); // Повідомляємо всім, що гра почалася
+            broadcastLobbyUpdate();
+        }
+    });
+
+    // !!! ВИПРАВЛЕНА ЛОГІКА
+    socket.on('admin_reset_game', () => {
+        if (isAdmin === 'true') {
+            players = {};
+            gameState = 'LOBBY';
+            console.log('[Admin] Гра скинута до стану лобі.');
+            broadcastLobbyUpdate();
+            // Повідомляємо гравців, щоб вони повернулися в лобі
+            io.emit('game_reset');
+        }
+    });
 
     socket.on('disconnect', () => {
+        // Шукаємо гравця за ID сокета, а не за currentUserId, бо це надійніше
         let disconnectedPlayerId = null;
         for (const pId in players) {
             if (players[pId].socketId === socket.id) {
@@ -91,7 +107,7 @@ io.on('connection', (socket) => {
                 break;
             }
         }
-        if (disconnectedPlayerId) {
+        if (disconnectedPlayerId && players[disconnectedPlayerId]) {
             console.log(`[Disconnect] Гравець '${players[disconnectedPlayerId].name}' відключився.`);
             delete players[disconnectedPlayerId];
             broadcastLobbyUpdate();
@@ -103,7 +119,6 @@ function broadcastLobbyUpdate() {
     io.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
 }
 
-// Функція для розсилки подій тільки гравцям (не адміну)
 function broadcastToPlayers(event, data) {
     Object.keys(players).forEach(pId => {
         io.to(pId).emit(event, data);
@@ -117,8 +132,8 @@ function updateGameData() {
     for (const pId in players) {
         const playerData = {
             gameState,
-            players: [players[pId]], // Гравець бачить тільки себе
-            zone: gameZone, // !!! Надсилаємо зону гравцю
+            players: [players[pId]],
+            zone: gameZone,
         };
         io.to(pId).emit('game_update', playerData);
     }
