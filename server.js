@@ -82,30 +82,14 @@ io.on('connection', (socket) => {
     const { userId, isBeacon } = socket.handshake.query;
     console.log(`[Connect] Нове підключення. UserID: ${userId || 'N/A'}, isBeacon: ${isBeacon}`);
 
-    if (isBeacon && userId) {
+    if (isBeacon && userId && players[userId]) {
         console.log(`[Сервер] Маячок підключився: UserID ${userId}`);
-        
-        if (!players[userId]) {
-            console.log(`[Сервер] Гравець ${userId} не знайдений (можливо, перепідключився). Створюємо новий об'єкт...`);
-            players[userId] = {
-                id: userId,
-                name: userId.includes('user-') ? userId.replace('user-', '') : `Гравець ${userId.substring(0, 4)}`,
-                location: null,
-                isOutOfZone: false,
-                outOfZoneSince: null,
-                eliminated: false,
-            };
-        }
-        
         players[userId].beaconSocketId = socket.id;
-        console.log(`[Сервер] Socket ID ${socket.id} присвоєно гравцю ${userId}`);
 
         socket.on('update_location', (locationData) => {
             if (players[userId]) {
                 players[userId].location = locationData;
                 updateViewers();
-            } else {
-                console.error(`[ПОМИЛКА] Отримано локацію для неіснуючого гравця: ${userId}`);
             }
         });
     } else if (userId) { // Це веб-клієнт
@@ -129,18 +113,17 @@ io.on('connection', (socket) => {
     }
     
     socket.on('register', ({ username, password }, callback) => {
-        console.log(`[Register] Отримано запит на реєстрацію для: ${username}`);
+        console.log(`[Register] Запит на реєстрацію для: ${username}`);
         if (users[username]) {
-            console.log(`[Register] Помилка: користувач ${username} вже існує.`);
-            return callback({ success: false, message: 'Користувач з таким іменем вже існує' });
+            return callback({ success: false, message: 'Користувач вже існує' });
         }
         users[username] = password;
-        console.log(`[Register] Успіх: створено користувача ${username}.`);
+        console.log(`[Register] Успіх: ${username}`);
         callback({ success: true });
     });
 
     socket.on('login', ({ username, password }, callback) => {
-        console.log(`[Login] Отримано запит на вхід для: ${username}`);
+        console.log(`[Login] Запит на вхід для: ${username}`);
         if (users[username] && users[username] === password) {
             const newUserId = `user-${username}`;
             if (!players[newUserId]) {
@@ -149,11 +132,10 @@ io.on('connection', (socket) => {
                     outOfZoneSince: null, eliminated: false,
                 };
             }
-            console.log(`[Login] Успіх: користувач ${username} увійшов. ID: ${newUserId}`);
+            console.log(`[Login] Успіх: ${username}, ID: ${newUserId}`);
             callback({ success: true, userId: newUserId });
             updateViewers();
         } else {
-            console.log(`[Login] Помилка: неправильний логін або пароль для ${username}.`);
             callback({ success: false, message: 'Неправильний логін або пароль' });
         }
     });
@@ -162,10 +144,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         if (players[userId]) {
-            console.log(`[Сервер] Відключився сокет для гравця ${players[userId].name}`);
             delete players[userId].beaconSocketId;
-        } else {
-            console.log(`[Сервер] Відключився сокет без гравця з userId: ${userId}`);
         }
     });
 });
@@ -191,6 +170,15 @@ function updateViewers() {
     });
 }
 
+// Додаємо обробник помилок, щоб уникнути "падіння" сервера
+server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        console.error(`[ПОМИЛКА] Порт ${PORT} вже використовується. Можливо, інша копія сервера вже запущена.`);
+    } else {
+        console.error(`[ПОМИЛКА СЕРВЕРА] ${err}`);
+    }
+});
+
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Сервер] Сервер запущено на всіх інтерфейсах, порт ${PORT}`);
+    console.log(`[Сервер] Сервер успішно запущено на порті ${PORT}`);
 });
