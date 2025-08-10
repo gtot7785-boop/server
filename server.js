@@ -18,7 +18,7 @@ let users = {}; // { username: password }
 let players = {}; // { userId: { id, name, location, socketId, isOutOfZone, outOfZoneSince, eliminated } }
 let gameZone = {
   latitude: 50.7472,
-  longitude: 50.7472,
+  longitude: 25.3253,
   radius: 5000,
 };
 
@@ -80,14 +80,11 @@ setInterval(() => {
 
 io.on('connection', (socket) => {
     const { userId, isBeacon } = socket.handshake.query;
-
-    // Ми більше не розриваємо з'єднання одразу, а чекаємо на події
-    console.log(`[Сервер] Нове підключення. UserID: ${userId}, isBeacon: ${isBeacon}`);
+    console.log(`[Connect] Нове підключення. UserID: ${userId || 'N/A'}, isBeacon: ${isBeacon}`);
 
     if (isBeacon && userId) {
         console.log(`[Сервер] Маячок підключився: UserID ${userId}`);
         
-        // !!! ОСНОВНЕ ВИПРАВЛЕННЯ: Гарантуємо, що об'єкт гравця існує !!!
         if (!players[userId]) {
             console.log(`[Сервер] Гравець ${userId} не знайдений (можливо, перепідключився). Створюємо новий об'єкт...`);
             players[userId] = {
@@ -100,7 +97,6 @@ io.on('connection', (socket) => {
             };
         }
         
-        // Тепер ця команда безпечна
         players[userId].beaconSocketId = socket.id;
         console.log(`[Сервер] Socket ID ${socket.id} присвоєно гравцю ${userId}`);
 
@@ -133,15 +129,18 @@ io.on('connection', (socket) => {
     }
     
     socket.on('register', ({ username, password }, callback) => {
+        console.log(`[Register] Отримано запит на реєстрацію для: ${username}`);
         if (users[username]) {
+            console.log(`[Register] Помилка: користувач ${username} вже існує.`);
             return callback({ success: false, message: 'Користувач з таким іменем вже існує' });
         }
         users[username] = password;
-        console.log(`[Реєстрація] Новий користувач: ${username}`);
+        console.log(`[Register] Успіх: створено користувача ${username}.`);
         callback({ success: true });
     });
 
     socket.on('login', ({ username, password }, callback) => {
+        console.log(`[Login] Отримано запит на вхід для: ${username}`);
         if (users[username] && users[username] === password) {
             const newUserId = `user-${username}`;
             if (!players[newUserId]) {
@@ -150,10 +149,11 @@ io.on('connection', (socket) => {
                     outOfZoneSince: null, eliminated: false,
                 };
             }
-            console.log(`[Вхід] Користувач ${username} увійшов в систему.`);
+            console.log(`[Login] Успіх: користувач ${username} увійшов. ID: ${newUserId}`);
             callback({ success: true, userId: newUserId });
             updateViewers();
         } else {
+            console.log(`[Login] Помилка: неправильний логін або пароль для ${username}.`);
             callback({ success: false, message: 'Неправильний логін або пароль' });
         }
     });
