@@ -38,12 +38,10 @@ io.on('connection', (socket) => {
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     }
     
-    // Якщо гравець повернувся (має userId)
     if (currentUserId && players[currentUserId]) {
         console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
-        players[currentUserId].socketId = socket.id; // Оновлюємо ID сокета
+        players[currentUserId].socketId = socket.id;
         socket.join(currentUserId);
-        // Негайно надсилаємо йому актуальний стан гри
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     }
 
@@ -91,19 +89,17 @@ io.on('connection', (socket) => {
     
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
-            // Не видаляємо гравців, а лише скидаємо стан гри
-            Object.values(players).forEach(p => {
-                p.location = null;
-                p.eliminated = false;
-            });
+            // Повністю очищуємо список гравців
+            players = {}; 
             gameState = 'LOBBY';
-            console.log('[Admin] Гра скинута до стану лобі.');
+            console.log('[Admin] Гру скинуто, лобі очищено.');
             broadcastLobbyUpdate();
-            io.emit('game_reset');
+            io.emit('game_reset'); // Сигнал для клієнтів, що треба вийти в головне меню
         }
     });
 
     socket.on('disconnect', () => {
+        // Логіка відключення тепер не видаляє гравця, щоб він міг повернутись
         let disconnectedPlayer = Object.values(players).find(p => p.socketId === socket.id);
         if (disconnectedPlayer) {
             console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' тимчасово відключився.`);
