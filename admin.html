@@ -9,6 +9,7 @@
         body { margin: 0; padding: 0; font-family: sans-serif; display: flex; }
         #map { flex-grow: 1; height: 100vh; }
         .sidebar { width: 350px; padding: 10px; background: #f4f4f4; overflow-y: auto; box-sizing: border-box; }
+        .game-controls { display: none; } /* Сховані за замовчуванням */
         #player-list { list-style: none; padding: 0; }
         #player-list li { padding: 5px; border-bottom: 1px solid #ddd; font-size: 14px; }
     </style>
@@ -18,9 +19,19 @@
     <div class="sidebar">
         <h3>Адмін-панель</h3>
         <p>Статус гри: <b id="game-status">...</b></p>
-        <button id="start-game-btn" style="width: 100%; margin-bottom: 5px; padding: 10px; background-color: #28a745; color: white; border: none; cursor: pointer;">Розпочати гру</button>
-        <button id="reset-game-btn" style="width: 100%; padding: 10px; background-color: #dc3545; color: white; border: none; cursor: pointer;">Скинути гру (нове лобі)</button>
+        <button id="start-game-btn">Розпочати гру</button>
+        <button id="reset-game-btn" style="background: #e74c3c;">Скинути гру</button>
         <hr>
+        <div id="game-controls" class="game-controls">
+            <h4>Керування зоною:</h4>
+            <p>Радіус (м): <input type="number" id="zone-radius" style="width: 80px;"></p>
+            <button id="update-zone-btn">Оновити зону</button>
+            <hr>
+            <h4>Глобальне повідомлення:</h4>
+            <input type="text" id="broadcast-msg" style="width: 100%;">
+            <button id="broadcast-btn" style="width: 100%; margin-top: 5px;">Надіслати</button>
+            <hr>
+        </div>
         <h4>Гравці (<span id="player-count">0</span>):</h4>
         <ul id="player-list"></ul>
     </div>
@@ -34,35 +45,75 @@
 
         const socket = io({ query: { isAdmin: 'true' } });
 
-        const gameStatusEl = document.getElementById('game-status');
-        const playerCountSpan = document.getElementById('player-count');
-        const playerListUl = document.getElementById('player-list');
-        const startGameBtn = document.getElementById('start-game-btn');
-        const resetGameBtn = document.getElementById('reset-game-btn');
-
-        startGameBtn.onclick = () => socket.emit('admin_start_game');
+        const gameControls = document.getElementById('game-controls');
+        const updateZoneBtn = document.getElementById('update-zone-btn');
+        const radiusInput = document.getElementById('zone-radius');
+        const broadcastBtn = document.getElementById('broadcast-btn');
+        const broadcastMsg = document.getElementById('broadcast-msg');
         
-        resetGameBtn.onclick = () => {
-            if (confirm('Ви впевнені, що хочете скинути гру? Всі гравці будуть видалені з лобі.')) {
-                socket.emit('admin_reset_game');
+        let currentZone = null;
+        let zoneCircle = null;
+        let playerMarkers = {};
+
+        // ... (код для кнопок start/reset) ...
+
+        updateZoneBtn.onclick = () => {
+            const newRadius = parseInt(radiusInput.value, 10);
+            if (currentZone && newRadius > 0) {
+                socket.emit('admin_update_zone', { ...currentZone, radius: newRadius });
+            }
+        };
+        broadcastBtn.onclick = () => {
+            if (broadcastMsg.value) {
+                socket.emit('admin_broadcast_message', broadcastMsg.value);
+                broadcastMsg.value = '';
             }
         };
 
         socket.on('game_state_update', (data) => {
-            const { gameState, players } = data;
+            const { gameState, players, zone } = data;
+            currentZone = zone;
+
+            // Показуємо/ховаємо елементи керування
+            if (gameState === 'IN_PROGRESS') {
+                gameControls.style.display = 'block';
+            } else {
+                gameControls.style.display = 'none';
+            }
             
-            gameStatusEl.innerText = gameState;
-            startGameBtn.disabled = gameState === 'IN_PROGRESS';
-            
-            playerCountSpan.innerText = players.length;
-            playerListUl.innerHTML = ''; // Очищуємо список перед оновленням
+            // ... (код оновлення статусу, списку гравців) ...
+
+            // Оновлення зони на карті
+            if (zone) {
+                radiusInput.value = zone.radius;
+                const center = [zone.latitude, zone.longitude];
+                if (zoneCircle) {
+                    zoneCircle.setLatLng(center).setRadius(zone.radius);
+                } else {
+                    zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
+                }
+            }
+
+            // !!! Оновлення маркерів гравців на карті
+            const updatedPlayerIds = [];
             players.forEach(player => {
-                const li = document.createElement('li');
-                li.innerText = `${player.name} (ID: ${player.id.substring(0, 6)}...)`;
-                playerListUl.appendChild(li);
+                updatedPlayerIds.push(player.id);
+                if (player.location) {
+                    const latLng = [player.location.latitude, player.location.longitude];
+                    if (playerMarkers[player.id]) {
+                        playerMarkers[player.id].setLatLng(latLng);
+                    } else {
+                        playerMarkers[player.id] = L.marker(latLng).addTo(map).bindPopup(player.name);
+                    }
+                }
             });
-            
-            // Тут можна буде додати логіку відображення гравців на карті
+            // Видаляємо маркери гравців, що відключилися
+            for (const pId in playerMarkers) {
+                if (!updatedPlayerIds.includes(pId)) {
+                    map.removeLayer(playerMarkers[pId]);
+                    delete playerMarkers[pId];
+                }
+            }
         });
     </script>
 </body>
