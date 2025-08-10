@@ -29,8 +29,8 @@ setInterval(() => {
 }, 2000);
 
 io.on('connection', (socket) => {
-    const { isAdmin, userId: restoredUserId } = socket.handshake.query;
-    let currentUserId = restoredUserId || null;
+    const { isAdmin, userId } = socket.handshake.query;
+    let currentUserId = userId || null;
 
     if (isAdmin === 'true') {
         socket.join('admins');
@@ -38,9 +38,13 @@ io.on('connection', (socket) => {
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     }
     
+    // Якщо гравець повернувся (має userId)
     if (currentUserId && players[currentUserId]) {
-        players[currentUserId].socketId = socket.id;
+        console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
+        players[currentUserId].socketId = socket.id; // Оновлюємо ID сокета
         socket.join(currentUserId);
+        // Негайно надсилаємо йому актуальний стан гри
+        socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     }
 
     socket.on('join_game', (playerName, callback) => {
@@ -72,7 +76,6 @@ io.on('connection', (socket) => {
 
     socket.on('admin_broadcast_message', (message) => {
         if (isAdmin === 'true') {
-            // Просто надсилаємо подію гравцям
             broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
         }
     });
@@ -88,7 +91,11 @@ io.on('connection', (socket) => {
     
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
-            players = {};
+            // Не видаляємо гравців, а лише скидаємо стан гри
+            Object.values(players).forEach(p => {
+                p.location = null;
+                p.eliminated = false;
+            });
             gameState = 'LOBBY';
             console.log('[Admin] Гра скинута до стану лобі.');
             broadcastLobbyUpdate();
@@ -97,17 +104,9 @@ io.on('connection', (socket) => {
     });
 
     socket.on('disconnect', () => {
-        let disconnectedPlayerId = null;
-        for (const pId in players) {
-            if (players[pId].socketId === socket.id) {
-                disconnectedPlayerId = pId;
-                break;
-            }
-        }
-        if (disconnectedPlayerId && players[disconnectedPlayerId]) {
-            console.log(`[Disconnect] Гравець '${players[disconnectedPlayerId].name}' відключився.`);
-            delete players[disconnectedPlayerId];
-            broadcastLobbyUpdate();
+        let disconnectedPlayer = Object.values(players).find(p => p.socketId === socket.id);
+        if (disconnectedPlayer) {
+            console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' тимчасово відключився.`);
         }
     });
 });
