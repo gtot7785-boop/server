@@ -3,6 +3,14 @@ const http = require('http');
 const { Server } = require("socket.io");
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const admin = require('firebase-admin');
+
+// !!! ВАЖЛИВО: Вкажіть тут назву вашого файлу з ключем від Firebase
+const serviceAccount = require('./YOUR-FIREBASE-KEY-FILE.json');
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount)
+});
 
 const PORT = 8080;
 
@@ -37,7 +45,7 @@ io.on('connection', (socket) => {
         console.log(`[Connect] Адміністратор підключився.`);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     }
-
+    
     if (currentUserId && players[currentUserId]) {
         players[currentUserId].socketId = socket.id;
         socket.join(currentUserId);
@@ -48,12 +56,20 @@ io.on('connection', (socket) => {
             return callback({ success: false, message: 'Гра вже почалася.' });
         }
         const newPlayerId = uuidv4();
-        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, eliminated: false };
+        // Додаємо поле pushToken
+        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, eliminated: false, pushToken: null };
         currentUserId = newPlayerId;
         socket.join(newPlayerId);
         console.log(`[Join] Гравець '${playerName}' приєднався.`);
         callback({ success: true, userId: newPlayerId });
         broadcastLobbyUpdate();
+    });
+    
+    socket.on('register_push_token', (token) => {
+        if (currentUserId && players[currentUserId]) {
+            players[currentUserId].pushToken = token;
+            console.log(`[Push] Зареєстровано токен для гравця ${players[currentUserId].name}`);
+        }
     });
 
     socket.on('update_location', (locationData) => {
@@ -66,40 +82,48 @@ io.on('connection', (socket) => {
         if (isAdmin === 'true') {
             gameZone = newZone;
             broadcastToPlayers('game_event', '⚠️ Адміністратор оновив ігрову зону!');
-            broadcastLobbyUpdate(); // Оновлюємо адмінку теж
+            broadcastLobbyUpdate();
         }
     });
 
     socket.on('admin_broadcast_message', (message) => {
         if (isAdmin === 'true') {
-            broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
+            const tokens = Object.values(players)
+                .map(p => p.pushToken)
+                .filter(t => t);
+
+            if (tokens.length > 0) {
+                const pushMessage = {
+                    notification: { title: 'Повідомлення від Адміна', body: message },
+                    tokens: tokens,
+                };
+                admin.messaging().sendMulticast(pushMessage)
+                    .then((response) => console.log('[Push] Сповіщення успішно надіслано:', response.successCount))
+                    .catch((error) => console.error('[Push] Помилка надсилання сповіщень:', error));
+            }
         }
     });
 
-    // !!! ВИПРАВЛЕНА ЛОГІКА
     socket.on('admin_start_game', () => {
         if (isAdmin === 'true' && gameState === 'LOBBY') {
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
-            io.emit('game_started'); // Повідомляємо всім, що гра почалася
+            io.emit('game_started');
             broadcastLobbyUpdate();
         }
     });
-
-    // !!! ВИПРАВЛЕНА ЛОГІКА
+    
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
             players = {};
             gameState = 'LOBBY';
             console.log('[Admin] Гра скинута до стану лобі.');
             broadcastLobbyUpdate();
-            // Повідомляємо гравців, щоб вони повернулися в лобі
             io.emit('game_reset');
         }
     });
 
     socket.on('disconnect', () => {
-        // Шукаємо гравця за ID сокета, а не за currentUserId, бо це надійніше
         let disconnectedPlayerId = null;
         for (const pId in players) {
             if (players[pId].socketId === socket.id) {

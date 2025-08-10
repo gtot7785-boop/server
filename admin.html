@@ -38,7 +38,7 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-
+    
     <script>
         const map = L.map('map').setView([50.7472, 25.3253], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
@@ -58,7 +58,27 @@
 
         let currentZone = null;
         let zoneCircle = null;
+        let previewCircle = null;
         let playerMarkers = {};
+
+        radiusInput.addEventListener('input', () => {
+            if (!currentZone) return;
+            const newRadius = parseInt(radiusInput.value, 10);
+            if (newRadius > 0) {
+                const center = [currentZone.latitude, currentZone.longitude];
+                if (previewCircle) {
+                    previewCircle.setLatLng(center).setRadius(newRadius);
+                } else {
+                    previewCircle = L.circle(center, {
+                        radius: newRadius,
+                        color: 'red',
+                        weight: 2,
+                        dashArray: '10, 10',
+                        fill: false
+                    }).addTo(map);
+                }
+            }
+        });
 
         startGameBtn.onclick = () => socket.emit('admin_start_game');
         resetGameBtn.onclick = () => {
@@ -70,6 +90,10 @@
             const newRadius = parseInt(radiusInput.value, 10);
             if (currentZone && newRadius > 0) {
                 socket.emit('admin_update_zone', { ...currentZone, radius: newRadius });
+                if (previewCircle) {
+                    map.removeLayer(previewCircle);
+                    previewCircle = null;
+                }
             }
         };
         broadcastBtn.onclick = () => {
@@ -85,7 +109,6 @@
 
             gameStatusEl.innerText = gameState;
             startGameBtn.disabled = gameState === 'IN_PROGRESS';
-
             gameControls.style.display = (gameState === 'IN_PROGRESS') ? 'block' : 'none';
 
             playerCountSpan.innerText = players.length;
@@ -113,9 +136,11 @@
                     delete playerMarkers[pId];
                 }
             }
-
+            
             if (zone) {
-                radiusInput.value = zone.radius;
+                if (document.activeElement !== radiusInput) {
+                    radiusInput.value = zone.radius;
+                }
                 const center = [zone.latitude, zone.longitude];
                 if (zoneCircle) {
                     zoneCircle.setLatLng(center).setRadius(zone.radius);
