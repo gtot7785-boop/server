@@ -110,55 +110,49 @@
             }
         };
 
+        // !!! ГОЛОВНИЙ ОБРОБНИК ПОДІЙ - ПОВНІСТЮ ПЕРЕРОБЛЕНИЙ ДЛЯ НАДІЙНОСТІ
         socket.on('game_state_update', (data) => {
             const { gameState, players, zone } = data;
             currentZone = zone;
 
+            // --- Оновлення UI ---
             gameStatusEl.innerText = gameState;
             startGameBtn.disabled = gameState === 'IN_PROGRESS';
             gameControls.style.display = (gameState === 'IN_PROGRESS') ? 'block' : 'none';
-
             playerCountSpan.innerText = players.length;
+
+            // --- Повне перемалювання списку гравців ---
             playerListUl.innerHTML = '';
-            const updatedPlayerIds = [];
             players.forEach(player => {
-                updatedPlayerIds.push(player.id);
                 const li = document.createElement('li');
                 li.innerText = player.name;
                 playerListUl.appendChild(li);
-
-                if (player.location) {
-                    const latLng = [player.location.latitude, player.location.longitude];
-                    if (playerMarkers[player.id]) {
-                        playerMarkers[player.id].moveTo(latLng, 2000);
-                    } else {
-                        const newMarker = L.animatedMarker([latLng]).bindPopup(player.name);
-                        playerMarkers[player.id] = newMarker;
-                        markersGroup.addLayer(newMarker);
-                    }
-                }
             });
 
-            for (const pId in playerMarkers) {
-                if (!updatedPlayerIds.includes(pId)) {
-                    markersGroup.removeLayer(playerMarkers[pId]);
-                    delete playerMarkers[pId];
-                }
+            // --- Повне перемалювання зони на карті ---
+            if (document.activeElement !== radiusInput) {
+                radiusInput.value = zone.radius;
             }
-
-            // !!! ВИПРАВЛЕНА ЛОГІКА ОНОВЛЕННЯ ЗОНИ
-            if (zone) {
-                if (document.activeElement !== radiusInput) {
-                    radiusInput.value = zone.radius;
-                }
-                const center = [zone.latitude, zone.longitude];
-
-                // Видаляємо старе коло і малюємо нове - найнадійніший спосіб
-                if (zoneCircle) {
-                    map.removeLayer(zoneCircle);
-                }
-                zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
+            if (zoneCircle) {
+                map.removeLayer(zoneCircle);
             }
+            zoneCircle = L.circle([zone.latitude, zone.longitude], { 
+                radius: zone.radius, 
+                color: 'blue', 
+                fillOpacity: 0.1 
+            }).addTo(map);
+
+            // --- Повне перемалювання маркерів гравців ---
+            markersGroup.clearLayers(); // Очищуємо всі старі маркери
+            playerMarkers = {};
+            players.forEach(player => {
+                if (player.location) {
+                    const latLng = [player.location.latitude, player.location.longitude];
+                    const newMarker = L.animatedMarker([latLng]).bindPopup(player.name);
+                    playerMarkers[player.id] = newMarker;
+                    markersGroup.addLayer(newMarker);
+                }
+            });
         });
     </script>
 </body>
