@@ -42,13 +42,13 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="https://unpkg.com/leaflet.animatedmarker@1.0.0/src/AnimatedMarker.js"></script>
-    
+
     <script>
         const map = L.map('map').setView([50.7472, 25.3253], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
         const socket = io({ query: { isAdmin: 'true' } });
-        
+
         const gameStatusEl = document.getElementById('game-status');
         const playerCountSpan = document.getElementById('player-count');
         const playerListUl = document.getElementById('player-list');
@@ -64,10 +64,10 @@
         let zoneCircle = null;
         let previewCircle = null;
         let playerMarkers = {};
-        
+
         const markersGroup = L.markerClusterGroup();
         map.addLayer(markersGroup);
-        
+
         radiusInput.addEventListener('input', () => {
             if (!currentZone) return;
             const newRadius = parseInt(radiusInput.value, 10);
@@ -86,7 +86,7 @@
                 }
             }
         });
-        
+
         startGameBtn.onclick = () => socket.emit('admin_start_game');
         resetGameBtn.onclick = () => {
             if (confirm('Ви впевнені, що хочете скинути гру? Всі гравці будуть видалені.')) {
@@ -113,20 +113,17 @@
         socket.on('game_state_update', (data) => {
             const { gameState, players, zone } = data;
             currentZone = zone;
-            
-            // --- Оновлення UI ---
+
             gameStatusEl.innerText = gameState;
             startGameBtn.disabled = gameState === 'IN_PROGRESS';
             gameControls.style.display = (gameState === 'IN_PROGRESS') ? 'block' : 'none';
+
             playerCountSpan.innerText = players.length;
             playerListUl.innerHTML = '';
-            
-            const currentPlayerIds = new Set();
 
-            // --- "Розумне" оновлення маркерів ---
-            // Крок 1: Оновлюємо існуючих та додаємо нових
+            const currentPlayerIds = new Set(players.map(p => p.id));
+
             players.forEach(player => {
-                currentPlayerIds.add(player.id);
                 const li = document.createElement('li');
                 li.innerText = player.name;
                 playerListUl.appendChild(li);
@@ -134,10 +131,8 @@
                 if (player.location) {
                     const latLng = [player.location.latitude, player.location.longitude];
                     if (playerMarkers[player.id]) {
-                        // Якщо маркер є - рухаємо його
                         playerMarkers[player.id].moveTo(latLng, 2000);
                     } else {
-                        // Якщо маркера немає - створюємо
                         const newMarker = L.animatedMarker([latLng]).bindPopup(player.name);
                         playerMarkers[player.id] = newMarker;
                         markersGroup.addLayer(newMarker);
@@ -145,15 +140,13 @@
                 }
             });
 
-            // Крок 2: Видаляємо тих, хто відключився
             for (const pId in playerMarkers) {
                 if (!currentPlayerIds.has(pId)) {
                     markersGroup.removeLayer(playerMarkers[pId]);
                     delete playerMarkers[pId];
                 }
             }
-            
-            // --- Оновлення зони ---
+
             if (zone) {
                 if (document.activeElement !== radiusInput) {
                     radiusInput.value = zone.radius;
