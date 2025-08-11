@@ -30,7 +30,7 @@
 
         const urlParams = new URLSearchParams(window.location.search);
         const myUserId = urlParams.get('userId');
-        
+
         if (!myUserId) {
             document.body.innerHTML = '<h1>Помилка: ID користувача не знайдено. Будь ласка, зайдіть через додаток.</h1>';
         }
@@ -47,8 +47,10 @@
             if (me && me.location) {
                 const latLng = [me.location.latitude, me.location.longitude];
                 if (myMarker) {
-                    myMarker.moveTo(latLng, 2000); // 2 секунди на анімацію
+                    // !!! ВИКОРИСТОВУЄМО ПЛАВНЕ ПЕРЕМІЩЕННЯ
+                    myMarker.moveTo(latLng, 2000); // 2000 мс = 2 секунди на анімацію
                 } else {
+                    // !!! СТВОРЮЄМО АНІМОВАНИЙ МАРКЕР
                     myMarker = L.animatedMarker([latLng], {
                         icon: L.divIcon({
                             className: 'player-marker',
