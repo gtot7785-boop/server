@@ -49,6 +49,13 @@ io.on('connection', (socket) => {
         if (gameState !== 'LOBBY') {
             return callback({ success: false, message: 'Гра вже почалася.' });
         }
+        
+        // Перевіряємо, чи ім'я вже використовується (без урахування регістру)
+        const isNameTaken = Object.values(players).some(p => p.name.toLowerCase() === playerName.toLowerCase());
+        if (isNameTaken) {
+            return callback({ success: false, message: 'Це ім\'я вже зайняте. Виберіть інше.' });
+        }
+
         const newPlayerId = uuidv4();
         players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, eliminated: false };
         currentUserId = newPlayerId;
@@ -89,17 +96,15 @@ io.on('connection', (socket) => {
     
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
-            // Повністю очищуємо список гравців
             players = {}; 
             gameState = 'LOBBY';
             console.log('[Admin] Гру скинуто, лобі очищено.');
             broadcastLobbyUpdate();
-            io.emit('game_reset'); // Сигнал для клієнтів, що треба вийти в головне меню
+            io.emit('game_reset');
         }
     });
 
     socket.on('disconnect', () => {
-        // Логіка відключення тепер не видаляє гравця, щоб він міг повернутись
         let disconnectedPlayer = Object.values(players).find(p => p.socketId === socket.id);
         if (disconnectedPlayer) {
             console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' тимчасово відключився.`);

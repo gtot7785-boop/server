@@ -5,6 +5,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
     <style>
         body { margin: 0; padding: 0; font-family: sans-serif; display: flex; }
         #map { flex-grow: 1; height: 100vh; }
@@ -38,13 +40,15 @@
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    <script src="https://unpkg.com/leaflet.animatedmarker@1.0.0/src/AnimatedMarker.js"></script>
     
     <script>
         const map = L.map('map').setView([50.7472, 25.3253], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
         const socket = io({ query: { isAdmin: 'true' } });
-
+        
         const gameStatusEl = document.getElementById('game-status');
         const playerCountSpan = document.getElementById('player-count');
         const playerListUl = document.getElementById('player-list');
@@ -60,7 +64,10 @@
         let zoneCircle = null;
         let previewCircle = null;
         let playerMarkers = {};
-
+        
+        const markersGroup = L.markerClusterGroup();
+        map.addLayer(markersGroup);
+        
         radiusInput.addEventListener('input', () => {
             if (!currentZone) return;
             const newRadius = parseInt(radiusInput.value, 10);
@@ -79,7 +86,7 @@
                 }
             }
         });
-
+        
         startGameBtn.onclick = () => socket.emit('admin_start_game');
         resetGameBtn.onclick = () => {
             if (confirm('Ви впевнені, що хочете скинути гру? Всі гравці будуть видалені.')) {
@@ -106,7 +113,7 @@
         socket.on('game_state_update', (data) => {
             const { gameState, players, zone } = data;
             currentZone = zone;
-
+            
             gameStatusEl.innerText = gameState;
             startGameBtn.disabled = gameState === 'IN_PROGRESS';
             gameControls.style.display = (gameState === 'IN_PROGRESS') ? 'block' : 'none';
@@ -123,16 +130,18 @@
                 if (player.location) {
                     const latLng = [player.location.latitude, player.location.longitude];
                     if (playerMarkers[player.id]) {
-                        playerMarkers[player.id].setLatLng(latLng);
+                        playerMarkers[player.id].moveTo(latLng, 2000);
                     } else {
-                        playerMarkers[player.id] = L.marker(latLng).addTo(map).bindPopup(player.name);
+                        const newMarker = L.animatedMarker([latLng]).bindPopup(player.name);
+                        playerMarkers[player.id] = newMarker;
+                        markersGroup.addLayer(newMarker);
                     }
                 }
             });
 
             for (const pId in playerMarkers) {
                 if (!updatedPlayerIds.includes(pId)) {
-                    map.removeLayer(playerMarkers[pId]);
+                    markersGroup.removeLayer(playerMarkers[pId]);
                     delete playerMarkers[pId];
                 }
             }
