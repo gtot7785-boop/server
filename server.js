@@ -50,7 +50,6 @@ io.on('connection', (socket) => {
             return callback({ success: false, message: 'Гра вже почалася.' });
         }
         
-        // Перевіряємо, чи ім'я вже використовується (без урахування регістру)
         const isNameTaken = Object.values(players).some(p => p.name.toLowerCase() === playerName.toLowerCase());
         if (isNameTaken) {
             return callback({ success: false, message: 'Це ім\'я вже зайняте. Виберіть інше.' });
@@ -63,6 +62,15 @@ io.on('connection', (socket) => {
         console.log(`[Join] Гравець '${playerName}' приєднався.`);
         callback({ success: true, userId: newPlayerId });
         broadcastLobbyUpdate();
+    });
+
+    // !!! НОВА ПОДІЯ: Гравець свідомо виходить з гри
+    socket.on('leave_game', () => {
+        if (currentUserId && players[currentUserId]) {
+            console.log(`[Leave] Гравець '${players[currentUserId].name}' покинув гру.`);
+            delete players[currentUserId];
+            broadcastLobbyUpdate();
+        }
     });
     
     socket.on('update_location', (locationData) => {
