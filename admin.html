@@ -42,13 +42,13 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="https://unpkg.com/leaflet.animatedmarker@1.0.0/src/AnimatedMarker.js"></script>
-
+    
     <script>
         const map = L.map('map').setView([50.7472, 25.3253], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
 
         const socket = io({ query: { isAdmin: 'true' } });
-
+        
         const gameStatusEl = document.getElementById('game-status');
         const playerCountSpan = document.getElementById('player-count');
         const playerListUl = document.getElementById('player-list');
@@ -64,10 +64,10 @@
         let zoneCircle = null;
         let previewCircle = null;
         let playerMarkers = {};
-
+        
         const markersGroup = L.markerClusterGroup();
         map.addLayer(markersGroup);
-
+        
         radiusInput.addEventListener('input', () => {
             if (!currentZone) return;
             const newRadius = parseInt(radiusInput.value, 10);
@@ -86,7 +86,7 @@
                 }
             }
         });
-
+        
         startGameBtn.onclick = () => socket.emit('admin_start_game');
         resetGameBtn.onclick = () => {
             if (confirm('Ви впевнені, що хочете скинути гру? Всі гравці будуть видалені.')) {
@@ -113,16 +113,18 @@
         socket.on('game_state_update', (data) => {
             const { gameState, players, zone } = data;
             currentZone = zone;
-
+            
+            // --- Оновлення UI ---
             gameStatusEl.innerText = gameState;
             startGameBtn.disabled = gameState === 'IN_PROGRESS';
             gameControls.style.display = (gameState === 'IN_PROGRESS') ? 'block' : 'none';
 
             playerCountSpan.innerText = players.length;
             playerListUl.innerHTML = '';
-
+            
             const currentPlayerIds = new Set(players.map(p => p.id));
 
+            // --- "Розумне" оновлення маркерів ---
             players.forEach(player => {
                 const li = document.createElement('li');
                 li.innerText = player.name;
@@ -146,17 +148,19 @@
                     delete playerMarkers[pId];
                 }
             }
-
+            
+            // --- Оновлення зони ---
             if (zone) {
                 if (document.activeElement !== radiusInput) {
                     radiusInput.value = zone.radius;
                 }
                 const center = [zone.latitude, zone.longitude];
+                
+                // !!! ВИПРАВЛЕНА ЛОГІКА: Видаляємо старе коло і малюємо нове - найнадійніший спосіб
                 if (zoneCircle) {
-                    zoneCircle.setLatLng(center).setRadius(zone.radius);
-                } else {
-                    zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
+                    map.removeLayer(zoneCircle);
                 }
+                zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
             }
         });
     </script>
