@@ -32,17 +32,18 @@ io.on('connection', (socket) => {
     const { isAdmin, userId } = socket.handshake.query;
     let currentUserId = userId || null;
 
+    // !!! ГОЛОВНЕ ВИПРАВЛЕННЯ: Надсилаємо стан кожному новому підключенню
+    socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+
     if (isAdmin === 'true') {
         socket.join('admins');
         console.log(`[Connect] Адміністратор підключився.`);
-        socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     }
     
     if (currentUserId && players[currentUserId]) {
         console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
         players[currentUserId].socketId = socket.id;
         socket.join(currentUserId);
-        socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     }
 
     socket.on('join_game', (playerName, callback) => {
@@ -64,7 +65,6 @@ io.on('connection', (socket) => {
         broadcastLobbyUpdate();
     });
 
-    // !!! НОВА ПОДІЯ: Гравець свідомо виходить з гри
     socket.on('leave_game', () => {
         if (currentUserId && players[currentUserId]) {
             console.log(`[Leave] Гравець '${players[currentUserId].name}' покинув гру.`);
