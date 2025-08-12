@@ -25,7 +25,6 @@ let gameZone = {
   radius: 5000,
 };
 
-// Функція для розрахунку відстані
 function getDistance(lat1, lon1, lat2, lon2) {
     if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return 0;
     const R = 6371e3; // Радіус Землі в метрах
@@ -33,40 +32,37 @@ function getDistance(lat1, lon1, lat2, lon2) {
     const φ2 = lat2 * Math.PI / 180;
     const Δφ = (lat2 - lat1) * Math.PI / 180;
     const Δλ = (lon2 - lon1) * Math.PI / 180;
-
-    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-              Math.cos(φ1) * Math.cos(φ2) *
-              Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const a = Math.sin(Δφ / 2) * Math.sin(Δφ / 2) + Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c; // Повертає відстань в метрах
+    return R * c;
 }
 
-// Головний ігровий цикл
 setInterval(() => {
     if (gameState !== 'IN_PROGRESS') return;
     
+    const now = Date.now();
+
     Object.values(players).forEach(player => {
         if (!player || !player.location) return;
 
-        const distance = getDistance(
-            player.location.latitude, player.location.longitude,
-            gameZone.latitude, gameZone.longitude
-        );
+        const distance = getDistance(player.location.latitude, player.location.longitude, gameZone.latitude, gameZone.longitude);
 
         if (distance > gameZone.radius) {
             if (!player.isOutside) {
                 player.isOutside = true;
-                player.outsideSince = Date.now();
-                player.lastWarningTime = 0;
-                console.log(`Гравець '${player.name}' покинув зону.`);
-            }
-
-            if (Date.now() - player.lastWarningTime > VIBRATION_INTERVAL) {
+                player.outsideSince = now;
+                player.lastWarningTime = now;
+                console.log(`Гравець '${player.name}' покинув зону. Запускаю таймер.`);
                 io.to(player.socketId).emit('vibrate_warning');
-                player.lastWarningTime = Date.now();
+            }
+            
+            if (now - player.lastWarningTime > VIBRATION_INTERVAL) {
+                console.log(`[Vibration] Надсилаю повторне попередження гравцю ${player.name}`);
+                io.to(player.socketId).emit('vibrate_warning');
+                player.lastWarningTime = now;
             }
 
-            if (Date.now() - player.outsideSince > KICK_TIMEOUT) {
+            if (now - player.outsideSince > KICK_TIMEOUT) {
                 io.to(player.socketId).emit('game_event', 'Ви були занадто довго поза зоною і вибули з гри!');
                 io.to(player.socketId).emit('game_reset');
                 delete players[player.id];
@@ -95,9 +91,9 @@ io.on('connection', (socket) => {
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     }
     else if (currentUserId && players[currentUserId]) {
-        console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
         players[currentUserId].socketId = socket.id;
         socket.join(currentUserId);
+        console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     } 
     else if (currentUserId && !players[currentUserId]) {
@@ -110,15 +106,7 @@ io.on('connection', (socket) => {
             return callback({ success: false, message: 'Гра вже почалася.' });
         }
         const newPlayerId = uuidv4();
-        players[newPlayerId] = { 
-            id: newPlayerId, 
-            name: playerName, 
-            socketId: socket.id, 
-            location: null, 
-            isOutside: false, 
-            outsideSince: null,
-            lastWarningTime: 0 
-        };
+        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, isOutside: false, outsideSince: null, lastWarningTime: 0 };
         currentUserId = newPlayerId;
         socket.join(newPlayerId);
         console.log(`[Join] Гравець '${playerName}' приєднався.`);
@@ -145,12 +133,10 @@ io.on('connection', (socket) => {
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
             io.emit('game_started');
-            setTimeout(() => {
-                updateGameData();
-            }, 500);
+            setTimeout(() => updateGameData(), 500);
         }
     });
-    
+
     socket.on('admin_update_zone', (newZone) => {
         if (isAdmin === 'true') {
             gameZone = newZone;
@@ -185,8 +171,7 @@ io.on('connection', (socket) => {
 });
 
 function broadcastLobbyUpdate() {
-    const data = { gameState, players: Object.values(players), zone: gameZone };
-    io.emit('game_state_update', data);
+    io.emit('game_state_update', { gameState, players: Object.values(players) });
 }
 
 function broadcastToPlayers(event, data) {
@@ -199,12 +184,22 @@ function broadcastToPlayers(event, data) {
 
 function updateGameData() {
     io.to('admins').emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+    
+    const now = Date.now();
     for (const pId in players) {
         if (players[pId] && players[pId].socketId) {
+            const player = players[pId];
+            
+            const timeLeft = player.isOutside ? KICK_TIMEOUT - (now - player.outsideSince) : KICK_TIMEOUT;
+
             const playerData = {
                 gameState,
-                players: [players[pId]],
+                players: [player],
                 zone: gameZone,
+                zoneStatus: {
+                    isOutside: player.isOutside,
+                    timeLeft: timeLeft > 0 ? timeLeft : 0,
+                }
             };
             io.to(pId).emit('game_update', playerData);
         }
