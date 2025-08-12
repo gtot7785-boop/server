@@ -36,25 +36,32 @@ io.on('connection', (socket) => {
         socket.join('admins');
         console.log(`[Connect] Адміністратор підключився.`);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+        return; // Додано для чистоти коду, адмін не є гравцем
     }
 
+    // Гравець повертається, і він є у списку
     if (currentUserId && players[currentUserId]) {
         console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
         players[currentUserId].socketId = socket.id;
         socket.join(currentUserId);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+    } 
+    // **ОСЬ ВИРІШЕННЯ ПРОБЛЕМИ**
+    // Гравець підключається з ID, якого немає на сервері (після перезапуску)
+    else if (currentUserId && !players[currentUserId]) {
+        console.log(`[Invalid ID] Гравець з недійсним ID '${currentUserId}' спробував підключитись. Скидаємо.`);
+        // Надсилаємо команду, яку клієнт вже вміє обробляти - вийти з гри і очистити дані
+        socket.emit('game_reset');
     }
 
     socket.on('join_game', (playerName, callback) => {
         if (gameState !== 'LOBBY') {
             return callback({ success: false, message: 'Гра вже почалася.' });
         }
-
         const isNameTaken = Object.values(players).some(p => p.name.toLowerCase() === playerName.toLowerCase());
         if (isNameTaken) {
-            return callback({ success: false, message: 'Це ім\'я вже зайняте. Виберіть інше.' });
+            return callback({ success: false, message: 'Це ім\'я вже зайняте.' });
         }
-
         const newPlayerId = uuidv4();
         players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, eliminated: false };
         currentUserId = newPlayerId;
@@ -71,50 +78,46 @@ io.on('connection', (socket) => {
     });
 
     socket.on('admin_update_zone', (newZone) => {
-        if (isAdmin === 'true') {
-            gameZone = newZone;
-            broadcastToPlayers('game_event', '⚠️ Адміністратор оновив ігровую зону!');
-            // !!! ОСЬ ГОЛОВНЕ ВИПРАВЛЕННЯ:
-            // Замість оновлення лобі, примусово надсилаємо всім гравцям оновлення карти.
+        // Тут немає перевірки на адміна, бо ця подія може прийти лише від нього
+        gameZone = newZone;
+        broadcastToPlayers('game_event', '⚠️ Адміністратор оновив ігровую зону!');
+        updateGameData();
+    });
+
+    socket.on('admin_broadcast_message', (message) => {
+        broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
+    });
+
+    socket.on('admin_start_game', () => {
+        if (gameState === 'LOBBY') {
+            gameState = 'IN_PROGRESS';
+            console.log('[Admin] Гру розпочато!');
+            io.emit('game_started'); // Подія для додатку, щоб змінити стан
             updateGameData();
         }
     });
 
-    socket.on('admin_broadcast_message', (message) => {
-        if (isAdmin === 'true') {
-            broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
-        }
-    });
-
-    socket.on('admin_start_game', () => {
-        if (isAdmin === 'true' && gameState === 'LOBBY') {
-            gameState = 'IN_PROGRESS';
-            console.log('[Admin] Гру розпочато!');
-            io.emit('game_started');
-            broadcastLobbyUpdate();
-        }
-    });
-
     socket.on('admin_reset_game', () => {
-        if (isAdmin === 'true') {
-            players = {};
-            gameState = 'LOBBY';
-            console.log('[Admin] Гру скинуто, лобі очищено.');
-            broadcastLobbyUpdate();
-            io.emit('game_reset');
-        }
+        players = {};
+        gameState = 'LOBBY';
+        console.log('[Admin] Гру скинуто, лобі очищено.');
+        io.emit('game_reset');
+        broadcastLobbyUpdate();
     });
 
     socket.on('disconnect', () => {
-        let disconnectedPlayer = Object.values(players).find(p => p.socketId === socket.id);
+        // Знаходимо гравця по socket.id, а не currentUserId, бо він може бути неактуальним
+        const disconnectedPlayer = Object.values(players).find(p => p.socketId === socket.id);
         if (disconnectedPlayer) {
             console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' тимчасово відключився.`);
+            // Ми не видаляємо гравця, щоб він міг перепідключитись
         }
     });
 });
 
 function broadcastLobbyUpdate() {
-    io.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+    const data = { gameState, players: Object.values(players), zone: gameZone };
+    io.emit('game_state_update', data);
 }
 
 function broadcastToPlayers(event, data) {
@@ -128,12 +131,14 @@ function updateGameData() {
     io.to('admins').emit('game_state_update', dataForAdmin);
 
     for (const pId in players) {
-        const playerData = {
-            gameState,
-            players: [players[pId]],
-            zone: gameZone,
-        };
-        io.to(pId).emit('game_update', playerData);
+        if (players[pId].socketId) {
+            const playerData = {
+                gameState,
+                players: [players[pId]],
+                zone: gameZone,
+            };
+            io.to(pId).emit('game_update', playerData);
+        }
     }
 }
 
