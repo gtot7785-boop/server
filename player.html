@@ -1,87 +1,101 @@
-<script>
-    const map = L.map('map').setView([50.7472, 25.3253], 13);
-    
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        attribution: 'Tiles &copy; Esri'
-    }).addTo(map);
-
-    const urlParams = new URLSearchParams(window.location.search);
-    const myUserId = urlParams.get('userId');
-
-    if (!myUserId) {
-        document.body.innerHTML = '<h1>Помилка: ID користувача не знайдено.</h1>';
-    }
-
-    const socket = io({ query: { userId: myUserId }, transports: ['websocket'] });
-
-    let myMarker = null;
-    let zoneCircle = null;
-
-    // Функція для малювання/оновлення зони. Ми будемо викликати її з різних місць.
-    function updateZoneOnMap(zoneData) {
-        if (!zoneData) return;
-        
-        console.log(`[MAP] Оновлюю зону на карті. Радіус: ${zoneData.radius}`);
-        const center = [zoneData.latitude, zoneData.longitude];
-        
-        if (zoneCircle) {
-            // Якщо коло вже є, оновлюємо його
-            zoneCircle.setLatLng(center);
-            zoneCircle.setRadius(zoneData.radius);
-        } else {
-            // Якщо кола немає, створюємо його
-            zoneCircle = L.circle(center, { 
-                radius: zoneData.radius, 
-                color: 'red', 
-                fillColor: '#f03', 
-                fillOpacity: 0.2 
-            }).addTo(map);
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Моя карта</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background-color: #333; }
+        .event-overlay {
+            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.7); color: white; padding: 10px 20px;
+            border-radius: 20px; z-index: 1000; animation: fadeOut 5s forwards;
+            pointer-events: none; font-family: sans-serif; text-align: center;
         }
-    }
+        @keyframes fadeOut { 0% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="event-container"></div>
 
-    // Слухач для загального оновлення гри (координати + початкове малювання зони)
-    socket.on('game_update', (data) => {
-        const { players, zone } = data;
-        const me = players[0];
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="https://unpkg.com/leaflet.animatedmarker@1.0.0/src/AnimatedMarker.js"></script>
 
-        if (me && me.location) {
-            const latLng = [me.location.latitude, me.location.longitude];
-            if (myMarker) {
-                myMarker.moveTo(latLng, 2000);
-            } else {
-                myMarker = L.animatedMarker([latLng], {
-                    icon: L.divIcon({
-                        className: 'player-marker',
-                        html: `<div style="background-color: #2980b9; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px black;"></div>`,
-                        iconSize: [20, 20]
-                    })
-                }).addTo(map);
-                map.setView(latLng, 15);
+    <script>
+        const map = L.map('map').setView([50.7472, 25.3253], 13);
+        
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri'
+        }).addTo(map);
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const myUserId = urlParams.get('userId');
+
+        if (!myUserId) {
+            document.body.innerHTML = '<h1>Помилка: ID користувача не знайдено.</h1>';
+        }
+
+        const socket = io({ query: { userId: myUserId }, transports: ['websocket'] });
+
+        let myMarker = null;
+        let zoneCircle = null;
+
+        // Єдиний слухач для всіх ігрових даних
+        socket.on('game_update', (data) => {
+            // Захист від помилок: якщо дані не прийшли, нічого не робити
+            if (!data || !data.players || !data.zone) {
+                console.error("Отримано некоректні дані 'game_update'", data);
+                return;
             }
-        }
-        
-        // Малюємо зону при першому завантаженні
-        if (!zoneCircle) {
-            updateZoneOnMap(zone);
-        }
-    });
+
+            const { players, zone } = data;
+            const me = players[0];
+
+            // Оновлення маркера
+            if (me && me.location) {
+                const latLng = [me.location.latitude, me.location.longitude];
+                if (myMarker) {
+                    myMarker.moveTo(latLng, 2000);
+                } else {
+                    myMarker = L.animatedMarker([latLng], {
+                        icon: L.divIcon({
+                            className: 'player-marker',
+                            html: `<div style="background-color: #2980b9; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px black;"></div>`,
+                            iconSize: [20, 20]
+                        })
+                    }).addTo(map);
+                    map.setView(latLng, 15);
+                }
+            }
+            
+            // Оновлення зони
+            const center = [zone.latitude, zone.longitude];
+            if (zoneCircle) {
+                zoneCircle.setLatLng(center);
+                zoneCircle.setRadius(zone.radius);
+            } else {
+                zoneCircle = L.circle(center, { 
+                    radius: zone.radius, 
+                    color: 'red', 
+                    fillOpacity: 0.15 
+                }).addTo(map);
+            }
+        });
     
-    // !!! ФІНАЛЬНЕ ВИПРАВЛЕННЯ ТУТ !!!
-    // Новий, спеціальний слухач тільки для оновлення зони
-    socket.on('zone_updated', (newZone) => {
-        console.log('✅ Отримано подію zone_updated!', newZone);
-        updateZoneOnMap(newZone);
-    });
+        socket.on('game_event', (message) => {
+            const eventContainer = document.getElementById('event-container');
+            const eventDiv = document.createElement('div');
+            eventDiv.className = 'event-overlay';
+            eventDiv.innerText = message;
+            eventContainer.appendChild(eventDiv);
+            setTimeout(() => eventDiv.remove(), 5000);
+        });
 
-    socket.on('game_event', (message) => {
-        const eventContainer = document.getElementById('event-container');
-        const eventDiv = document.createElement('div');
-        eventDiv.className = 'event-overlay';
-        eventDiv.innerText = message;
-        eventContainer.appendChild(eventDiv);
-        setTimeout(() => eventDiv.remove(), 5000);
-    });
-
-    socket.on('connect', () => console.log('Сокет успішно підключено!'));
-    socket.on('disconnect', () => console.error('Сокет відключено!'));
-</script>
+        socket.on('connect', () => console.log('Сокет успішно підключено!'));
+        socket.on('disconnect', () => console.error('Сокет відключено!'));
+    </script>
+</body>
+</html>
