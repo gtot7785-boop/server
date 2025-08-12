@@ -41,7 +41,11 @@
 
     <script>
         const map = L.map('map').setView([50.7472, 25.3253], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        
+        // НОВИЙ ШАР КАРТИ (СУПУТНИК)
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri'
+        }).addTo(map);
 
         const socket = io({ query: { isAdmin: 'true' } });
 
@@ -60,7 +64,6 @@
         let zoneCircle = null;
         let playerMarkers = {};
 
-        // --- Обробники кнопок без змін ---
         startGameBtn.onclick = () => socket.emit('admin_start_game');
         resetGameBtn.onclick = () => {
             if (confirm('Ви впевнені, що хочете скинути гру? Всі гравці будуть видалені.')) {
@@ -93,7 +96,6 @@
 
             const currentPlayerIds = new Set(players.map(p => p.id));
 
-            // --- Оновлення маркерів з використанням стандартних функцій ---
             players.forEach(player => {
                 const li = document.createElement('li');
                 li.innerText = player.name;
@@ -102,26 +104,22 @@
                 if (player.location) {
                     const latLng = [player.location.latitude, player.location.longitude];
                     if (playerMarkers[player.id]) {
-                        // Використовуємо стандартний .setLatLng()
                         playerMarkers[player.id].setLatLng(latLng);
                     } else {
-                        // Використовуємо стандартний L.marker()
                         const newMarker = L.marker(latLng).bindPopup(player.name);
                         playerMarkers[player.id] = newMarker;
-                        newMarker.addTo(map); // Додаємо маркер прямо на карту
+                        newMarker.addTo(map);
                     }
                 }
             });
 
-            // Видаляємо маркери старих гравців
             for (const pId in playerMarkers) {
                 if (!currentPlayerIds.has(pId)) {
-                    map.removeLayer(playerMarkers[pId]); // Видаляємо з карти
+                    map.removeLayer(playerMarkers[pId]);
                     delete playerMarkers[pId];
                 }
             }
 
-            // Оновлення зони
             if (zone) {
                 if (document.activeElement !== radiusInput) {
                     radiusInput.value = zone.radius;
