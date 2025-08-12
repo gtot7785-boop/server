@@ -58,11 +58,21 @@ io.on('connection', (socket) => {
         }
         const newPlayerId = uuidv4();
         players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, eliminated: false };
-        currentUserId = newPlayerId;
+        currentUserId = newPlayerId; // Важливо: оновлюємо ID для поточної сесії
         socket.join(newPlayerId);
         console.log(`[Join] Гравець '${playerName}' приєднався.`);
         callback({ success: true, userId: newPlayerId });
         broadcastLobbyUpdate();
+    });
+
+    // !!! НОВИЙ ОБРОБНИК ДЛЯ ВИХОДУ З ГРИ !!!
+    // Вирішує проблему "привидів" у лобі
+    socket.on('leave_game', () => {
+        if (currentUserId && players[currentUserId]) {
+            console.log(`[Leave] Гравець '${players[currentUserId].name}' покинув гру.`);
+            delete players[currentUserId];
+            broadcastLobbyUpdate();
+        }
     });
 
     socket.on('update_location', (locationData) => {
