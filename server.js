@@ -90,17 +90,14 @@ io.on('connection', (socket) => {
         }
     });
     
-    // !!! НАЙБІЛЬШ НАДІЙНИЙ ВАРІАНТ ОНОВЛЕННЯ ЗОНИ !!!
+    // !!! ОСЬ ЗМІНА !!!
     socket.on('admin_update_zone', (newZone) => {
         if (isAdmin === 'true') {
-            gameZone = newZone;
-            console.log(`[Admin] Зона оновлена. Новий радіус: ${gameZone.radius}`);
+            gameZone = newZone; // Оновлюємо зону на сервері
+            console.log(`[Admin] Зона оновлена. Надсилаю команду на перезавантаження.`);
             
-            // Крок 1: Розсилаємо усім гравцям загальне оновлення даних, яке містить нову зону.
-            updateGameData();
-            
-            // Крок 2: Додатково надсилаємо повідомлення про подію.
-            broadcastToPlayers('game_event', '⚠️ Адміністратор оновив ігровую зону!');
+            // Розсилаємо усім гравцям команду на перезавантаження сторінки
+            broadcastToPlayers('force_reload', {});
         }
     });
 
@@ -135,7 +132,6 @@ function broadcastLobbyUpdate() {
     io.emit('game_state_update', data);
 }
 
-// Повертаємо до простої та надійної версії
 function broadcastToPlayers(event, data) {
     Object.keys(players).forEach(pId => {
         io.to(pId).emit(event, data);

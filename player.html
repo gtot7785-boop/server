@@ -1,101 +1,76 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Моя карта</title>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-        html, body, #map { height: 100%; width: 100%; margin: 0; padding: 0; background-color: #333; }
-        .event-overlay {
-            position: absolute; top: 10px; left: 50%; transform: translateX(-50%);
-            background: rgba(0,0,0,0.7); color: white; padding: 10px 20px;
-            border-radius: 20px; z-index: 1000; animation: fadeOut 5s forwards;
-            pointer-events: none; font-family: sans-serif; text-align: center;
-        }
-        @keyframes fadeOut { 0% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
-    </style>
-</head>
-<body>
-    <div id="map"></div>
-    <div id="event-container"></div>
-
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-    <script src="https://unpkg.com/leaflet.animatedmarker@1.0.0/src/AnimatedMarker.js"></script>
-
-    <script>
-        const map = L.map('map').setView([50.7472, 25.3253], 13);
-        
-        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-            attribution: 'Tiles &copy; Esri'
-        }).addTo(map);
-
-        const urlParams = new URLSearchParams(window.location.search);
-        const myUserId = urlParams.get('userId');
-
-        if (!myUserId) {
-            document.body.innerHTML = '<h1>Помилка: ID користувача не знайдено.</h1>';
-        }
-
-        const socket = io({ query: { userId: myUserId }, transports: ['websocket'] });
-
-        let myMarker = null;
-        let zoneCircle = null;
-
-        // Єдиний слухач для всіх ігрових даних
-        socket.on('game_update', (data) => {
-            // Захист від помилок: якщо дані не прийшли, нічого не робити
-            if (!data || !data.players || !data.zone) {
-                console.error("Отримано некоректні дані 'game_update'", data);
-                return;
-            }
-
-            const { players, zone } = data;
-            const me = players[0];
-
-            // Оновлення маркера
-            if (me && me.location) {
-                const latLng = [me.location.latitude, me.location.longitude];
-                if (myMarker) {
-                    myMarker.moveTo(latLng, 2000);
-                } else {
-                    myMarker = L.animatedMarker([latLng], {
-                        icon: L.divIcon({
-                            className: 'player-marker',
-                            html: `<div style="background-color: #2980b9; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px black;"></div>`,
-                            iconSize: [20, 20]
-                        })
-                    }).addTo(map);
-                    map.setView(latLng, 15);
-                }
-            }
-            
-            // Оновлення зони
-            const center = [zone.latitude, zone.longitude];
-            if (zoneCircle) {
-                zoneCircle.setLatLng(center);
-                zoneCircle.setRadius(zone.radius);
-            } else {
-                zoneCircle = L.circle(center, { 
-                    radius: zone.radius, 
-                    color: 'red', 
-                    fillOpacity: 0.15 
-                }).addTo(map);
-            }
-        });
+<script>
+    const map = L.map('map').setView([50.7472, 25.3253], 13);
     
-        socket.on('game_event', (message) => {
-            const eventContainer = document.getElementById('event-container');
-            const eventDiv = document.createElement('div');
-            eventDiv.className = 'event-overlay';
-            eventDiv.innerText = message;
-            eventContainer.appendChild(eventDiv);
-            setTimeout(() => eventDiv.remove(), 5000);
-        });
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        attribution: 'Tiles &copy; Esri'
+    }).addTo(map);
 
-        socket.on('connect', () => console.log('Сокет успішно підключено!'));
-        socket.on('disconnect', () => console.error('Сокет відключено!'));
-    </script>
-</body>
-</html>
+    const urlParams = new URLSearchParams(window.location.search);
+    const myUserId = urlParams.get('userId');
+
+    if (!myUserId) {
+        document.body.innerHTML = '<h1>Помилка: ID користувача не знайдено.</h1>';
+    }
+
+    const socket = io({ query: { userId: myUserId }, transports: ['websocket'] });
+
+    let myMarker = null;
+    let zoneCircle = null;
+
+    socket.on('game_update', (data) => {
+        if (!data || !data.players || !data.zone) {
+            console.error("Отримано некоректні дані 'game_update'", data);
+            return;
+        }
+
+        const { players, zone } = data;
+        const me = players[0];
+
+        if (me && me.location) {
+            const latLng = [me.location.latitude, me.location.longitude];
+            if (myMarker) {
+                myMarker.moveTo(latLng, 2000);
+            } else {
+                myMarker = L.animatedMarker([latLng], {
+                    icon: L.divIcon({
+                        className: 'player-marker',
+                        html: `<div style="background-color: #2980b9; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px black;"></div>`,
+                        iconSize: [20, 20]
+                    })
+                }).addTo(map);
+                map.setView(latLng, 15);
+            }
+        }
+        
+        const center = [zone.latitude, zone.longitude];
+        if (zoneCircle) {
+            zoneCircle.setLatLng(center);
+            zoneCircle.setRadius(zone.radius);
+        } else {
+            zoneCircle = L.circle(center, { 
+                radius: zone.radius, 
+                color: 'red', 
+                fillOpacity: 0.15 
+            }).addTo(map);
+        }
+    });
+
+    // !!! ОСЬ ЗМІНА !!!
+    // Новий слухач, який просто перезавантажує сторінку
+    socket.on('force_reload', () => {
+        console.log('Отримано команду від сервера: перезавантаження...');
+        location.reload();
+    });
+    
+    socket.on('game_event', (message) => {
+        const eventContainer = document.getElementById('event-container');
+        const eventDiv = document.createElement('div');
+        eventDiv.className = 'event-overlay';
+        eventDiv.innerText = message;
+        eventContainer.appendChild(eventDiv);
+        setTimeout(() => eventDiv.remove(), 5000);
+    });
+
+    socket.on('connect', () => console.log('Сокет успішно підключено!'));
+    socket.on('disconnect', () => console.error('Сокет відключено!'));
+</script>
