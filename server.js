@@ -79,28 +79,28 @@ io.on('connection', (socket) => {
         }
     });
 
-    // !!! ОНОВЛЕНА ЛОГІКА СТАРТУ ГРИ !!!
     socket.on('admin_start_game', () => {
         if (isAdmin === 'true' && gameState === 'LOBBY') {
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
-            
-            // Крок 1: Повідомляємо всіх, що стан гри змінився. Це команда для зміни інтерфейсу.
             io.emit('game_started');
-            
-            // Крок 2: З невеликою затримкою надсилаємо перші дані гри (координати та зону).
-            // Це дає клієнтам час перебудувати інтерфейс.
             setTimeout(() => {
                 updateGameData();
-            }, 500); // Затримка в 0.5 секунди
+            }, 500);
         }
     });
 
+    // !!! ФІНАЛЬНЕ ВИПРАВЛЕННЯ ТУТ !!!
     socket.on('admin_update_zone', (newZone) => {
         if (isAdmin === 'true') {
-            gameZone = newZone;
+            gameZone = newZone; // Оновлюємо зону на сервері
+            console.log(`[Admin] Зона оновлена. Новий радіус: ${gameZone.radius}`);
+            
+            // Розсилаємо усім гравцям спеціальну подію з новою зоною
+            broadcastToPlayers('zone_updated', gameZone);
+            
+            // Також надсилаємо повідомлення про подію
             broadcastToPlayers('game_event', '⚠️ Адміністратор оновив ігровую зону!');
-            updateGameData();
         }
     });
 
@@ -137,7 +137,10 @@ function broadcastLobbyUpdate() {
 
 function broadcastToPlayers(event, data) {
     Object.keys(players).forEach(pId => {
-        io.to(pId).emit(event, data);
+        // Перевіряємо, чи гравець досі підключений
+        if (io.sockets.sockets.get(players[pId].socketId)) {
+            io.to(players[pId].socketId).emit(event, data);
+        }
     });
 }
 
