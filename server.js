@@ -41,7 +41,6 @@ setInterval(() => {
     if (gameState !== 'IN_PROGRESS') return;
     
     const now = Date.now();
-
     Object.values(players).forEach(player => {
         if (!player || !player.location) return;
 
@@ -52,11 +51,11 @@ setInterval(() => {
                 player.isOutside = true;
                 player.outsideSince = now;
                 player.lastWarningTime = now;
-                console.log(`Гравець '${player.name}' покинув зону. Запускаю таймер.`);
+                console.log(`[Vibration] Надсилаю перше попередження гравцю ${player.name}`);
                 io.to(player.socketId).emit('vibrate_warning');
             }
             
-            if (now - player.lastWarningTime > VIBRATION_INTERVAL) {
+            if (now - player.lastWarningTime >= VIBRATION_INTERVAL) {
                 console.log(`[Vibration] Надсилаю повторне попередження гравцю ${player.name}`);
                 io.to(player.socketId).emit('vibrate_warning');
                 player.lastWarningTime = now;
@@ -65,12 +64,11 @@ setInterval(() => {
             if (now - player.outsideSince > KICK_TIMEOUT) {
                 io.to(player.socketId).emit('game_event', 'Ви були занадто довго поза зоною і вибули з гри!');
                 io.to(player.socketId).emit('game_reset');
-                delete players[player.id];
+                if (players[player.id]) delete players[player.id];
                 broadcastLobbyUpdate();
             }
         } else {
             if (player.isOutside) {
-                console.log(`Гравець '${player.name}' повернувся в зону.`);
                 player.isOutside = false;
                 player.outsideSince = null;
                 io.to(player.socketId).emit('game_event', 'Ви повернулись у безпечну зону!');
@@ -189,16 +187,14 @@ function updateGameData() {
     for (const pId in players) {
         if (players[pId] && players[pId].socketId) {
             const player = players[pId];
-            
             const timeLeft = player.isOutside ? KICK_TIMEOUT - (now - player.outsideSince) : KICK_TIMEOUT;
-
-            const playerData = {
-                gameState,
-                players: [player],
-                zone: gameZone,
-                zoneStatus: {
-                    isOutside: player.isOutside,
-                    timeLeft: timeLeft > 0 ? timeLeft : 0,
+            const playerData = { 
+                gameState, 
+                players: [player], 
+                zone: gameZone, 
+                zoneStatus: { 
+                    isOutside: player.isOutside, 
+                    timeLeft: timeLeft > 0 ? timeLeft : 0 
                 }
             };
             io.to(pId).emit('game_update', playerData);
