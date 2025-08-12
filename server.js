@@ -23,6 +23,7 @@ let gameZone = {
   radius: 5000,
 };
 
+// Періодичне оновлення даних лише під час активної гри
 setInterval(() => {
     if (gameState !== 'IN_PROGRESS') return;
     updateGameData();
@@ -36,9 +37,7 @@ io.on('connection', (socket) => {
         socket.join('admins');
         console.log(`[Connect] Адміністратор підключився.`);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
-        // РЯДОК 'return;' БУВ ТУТ І ВСЕ ЛАМАВ. Я ЙОГО ВИДАЛИВ.
     }
-
     // Гравець повертається, і він є у списку
     else if (currentUserId && players[currentUserId]) {
         console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
@@ -51,8 +50,6 @@ io.on('connection', (socket) => {
         console.log(`[Invalid ID] Гравець з недійсним ID '${currentUserId}' спробував підключитись. Скидаємо.`);
         socket.emit('game_reset');
     }
-
-    // ОБРОБНИКИ ПОДІЙ (ТЕПЕР ПРАЦЮВАТИМУТЬ І ДЛЯ АДМІНА)
 
     socket.on('join_game', (playerName, callback) => {
         if (gameState !== 'LOBBY') {
@@ -78,12 +75,16 @@ io.on('connection', (socket) => {
     });
 
     socket.on('admin_start_game', () => {
-        // Повернули перевірку на адміна
         if (isAdmin === 'true' && gameState === 'LOBBY') {
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
+            
+            // Повідомляємо додаток, що стан змінився
             io.emit('game_started');
-            updateGameData(); // Використовуємо цю функцію для надсилання першого стану
+            
+            // **ОСЬ КЛЮЧОВЕ ВИПРАВЛЕННЯ**
+            // Викликаємо правильну функцію для надсилання даних гравцям і адміну
+            updateGameData();
         }
     });
 
@@ -121,8 +122,6 @@ io.on('connection', (socket) => {
     });
 });
 
-// Функції без змін
-
 function broadcastLobbyUpdate() {
     const data = { gameState, players: Object.values(players), zone: gameZone };
     io.emit('game_state_update', data);
@@ -141,12 +140,14 @@ function updateGameData() {
 
     // Кожен гравець отримує оновлення карти
     for (const pId in players) {
+        // Перевіряємо, чи гравець досі підключений
         if (players[pId].socketId) {
             const playerData = {
                 gameState,
-                players: [players[pId]],
+                players: [players[pId]], // Надсилаємо масив з одним гравцем - ним самим
                 zone: gameZone,
             };
+            // Надсилаємо персональну подію 'game_update'
             io.to(pId).emit('game_update', playerData);
         }
     }
