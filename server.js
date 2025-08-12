@@ -36,23 +36,23 @@ io.on('connection', (socket) => {
         socket.join('admins');
         console.log(`[Connect] Адміністратор підключився.`);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
-        return; // Додано для чистоти коду, адмін не є гравцем
+        // РЯДОК 'return;' БУВ ТУТ І ВСЕ ЛАМАВ. Я ЙОГО ВИДАЛИВ.
     }
 
     // Гравець повертається, і він є у списку
-    if (currentUserId && players[currentUserId]) {
+    else if (currentUserId && players[currentUserId]) {
         console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
         players[currentUserId].socketId = socket.id;
         socket.join(currentUserId);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
     } 
-    // **ОСЬ ВИРІШЕННЯ ПРОБЛЕМИ**
     // Гравець підключається з ID, якого немає на сервері (після перезапуску)
     else if (currentUserId && !players[currentUserId]) {
         console.log(`[Invalid ID] Гравець з недійсним ID '${currentUserId}' спробував підключитись. Скидаємо.`);
-        // Надсилаємо команду, яку клієнт вже вміє обробляти - вийти з гри і очистити дані
         socket.emit('game_reset');
     }
+
+    // ОБРОБНИКИ ПОДІЙ (ТЕПЕР ПРАЦЮВАТИМУТЬ І ДЛЯ АДМІНА)
 
     socket.on('join_game', (playerName, callback) => {
         if (gameState !== 'LOBBY') {
@@ -77,43 +77,51 @@ io.on('connection', (socket) => {
         }
     });
 
-    socket.on('admin_update_zone', (newZone) => {
-        // Тут немає перевірки на адміна, бо ця подія може прийти лише від нього
-        gameZone = newZone;
-        broadcastToPlayers('game_event', '⚠️ Адміністратор оновив ігровую зону!');
-        updateGameData();
-    });
-
-    socket.on('admin_broadcast_message', (message) => {
-        broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
-    });
-
     socket.on('admin_start_game', () => {
-        if (gameState === 'LOBBY') {
+        // Повернули перевірку на адміна
+        if (isAdmin === 'true' && gameState === 'LOBBY') {
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
-            io.emit('game_started'); // Подія для додатку, щоб змінити стан
+            io.emit('game_started');
+            updateGameData(); // Використовуємо цю функцію для надсилання першого стану
+        }
+    });
+
+    socket.on('admin_update_zone', (newZone) => {
+        if (isAdmin === 'true') {
+            gameZone = newZone;
+            broadcastToPlayers('game_event', '⚠️ Адміністратор оновив ігровую зону!');
             updateGameData();
         }
     });
 
+    socket.on('admin_broadcast_message', (message) => {
+        if (isAdmin === 'true') {
+            broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
+        }
+    });
+
     socket.on('admin_reset_game', () => {
-        players = {};
-        gameState = 'LOBBY';
-        console.log('[Admin] Гру скинуто, лобі очищено.');
-        io.emit('game_reset');
-        broadcastLobbyUpdate();
+        if (isAdmin === 'true') {
+            players = {};
+            gameState = 'LOBBY';
+            console.log('[Admin] Гру скинуто, лобі очищено.');
+            io.emit('game_reset');
+            broadcastLobbyUpdate();
+        }
     });
 
     socket.on('disconnect', () => {
-        // Знаходимо гравця по socket.id, а не currentUserId, бо він може бути неактуальним
         const disconnectedPlayer = Object.values(players).find(p => p.socketId === socket.id);
         if (disconnectedPlayer) {
             console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' тимчасово відключився.`);
-            // Ми не видаляємо гравця, щоб він міг перепідключитись
+        } else if (isAdmin === 'true') {
+            console.log(`[Disconnect] Адміністратор відключився.`);
         }
     });
 });
+
+// Функції без змін
 
 function broadcastLobbyUpdate() {
     const data = { gameState, players: Object.values(players), zone: gameZone };
@@ -127,9 +135,11 @@ function broadcastToPlayers(event, data) {
 }
 
 function updateGameData() {
+    // Адмін отримує дані про всіх
     const dataForAdmin = { gameState, players: Object.values(players), zone: gameZone };
     io.to('admins').emit('game_state_update', dataForAdmin);
 
+    // Кожен гравець отримує оновлення карти
     for (const pId in players) {
         if (players[pId].socketId) {
             const playerData = {
