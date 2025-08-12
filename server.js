@@ -97,7 +97,7 @@ io.on('connection', (socket) => {
 
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
-            players = {}; 
+            players = {};
             gameState = 'LOBBY';
             console.log('[Admin] Гру скинуто, лобі очищено.');
             broadcastLobbyUpdate();
