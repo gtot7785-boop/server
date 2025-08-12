@@ -27,6 +27,7 @@ let gameZone = {
 
 // Функція для розрахунку відстані
 function getDistance(lat1, lon1, lat2, lon2) {
+    if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return 0;
     const R = 6371e3; // Радіус Землі в метрах
     const φ1 = lat1 * Math.PI / 180;
     const φ2 = lat2 * Math.PI / 180;
@@ -37,7 +38,6 @@ function getDistance(lat1, lon1, lat2, lon2) {
               Math.cos(φ1) * Math.cos(φ2) *
               Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
     return R * c; // Повертає відстань в метрах
 }
 
@@ -45,9 +45,8 @@ function getDistance(lat1, lon1, lat2, lon2) {
 setInterval(() => {
     if (gameState !== 'IN_PROGRESS') return;
     
-    // Перевіряємо кожного гравця
     Object.values(players).forEach(player => {
-        if (!player.location) return;
+        if (!player || !player.location) return;
 
         const distance = getDistance(
             player.location.latitude, player.location.longitude,
@@ -55,31 +54,25 @@ setInterval(() => {
         );
 
         if (distance > gameZone.radius) {
-            // Гравець ПОЗА зоною
             if (!player.isOutside) {
-                // Він щойно вийшов
                 player.isOutside = true;
                 player.outsideSince = Date.now();
-                player.lastWarningTime = 0; // Скидаємо, щоб відразу надіслати попередження
+                player.lastWarningTime = 0;
                 console.log(`Гравець '${player.name}' покинув зону.`);
             }
 
-            // Перевіряємо, чи не час надіслати вібрацію
             if (Date.now() - player.lastWarningTime > VIBRATION_INTERVAL) {
                 io.to(player.socketId).emit('vibrate_warning');
                 player.lastWarningTime = Date.now();
             }
 
-            // Перевіряємо, чи не час його "викинути" з гри
             if (Date.now() - player.outsideSince > KICK_TIMEOUT) {
                 io.to(player.socketId).emit('game_event', 'Ви були занадто довго поза зоною і вибули з гри!');
-                io.to(player.socketId).emit('game_reset'); // Команда на скидання до лобі
+                io.to(player.socketId).emit('game_reset');
                 delete players[player.id];
-                broadcastLobbyUpdate(); // Оновлюємо список гравців для всіх
+                broadcastLobbyUpdate();
             }
-
         } else {
-            // Гравець У ЗОНІ
             if (player.isOutside) {
                 console.log(`Гравець '${player.name}' повернувся в зону.`);
                 player.isOutside = false;
@@ -90,7 +83,7 @@ setInterval(() => {
     });
 
     updateGameData();
-}, 2000); // Перевірка кожні 2 секунди
+}, 2000);
 
 io.on('connection', (socket) => {
     const { isAdmin, userId } = socket.handshake.query;
@@ -117,7 +110,6 @@ io.on('connection', (socket) => {
             return callback({ success: false, message: 'Гра вже почалася.' });
         }
         const newPlayerId = uuidv4();
-        // Додаємо нові поля для гравця
         players[newPlayerId] = { 
             id: newPlayerId, 
             name: playerName, 
@@ -134,27 +126,89 @@ io.on('connection', (socket) => {
         broadcastLobbyUpdate();
     });
     
-    // Решта коду без змін...
-    socket.on('leave_game', () => { /* ... */ });
-    socket.on('update_location', (locationData) => { /* ... */ });
-    socket.on('admin_start_game', () => { /* ... */ });
-    socket.on('admin_update_zone', (newZone) => { /* ... */ });
-    socket.on('admin_broadcast_message', (message) => { /* ... */ });
-    socket.on('admin_reset_game', () => { /* ... */ });
-    socket.on('disconnect', () => { /* ... */ });
+    socket.on('leave_game', () => {
+        if (currentUserId && players[currentUserId]) {
+            console.log(`[Leave] Гравець '${players[currentUserId].name}' покинув гру.`);
+            delete players[currentUserId];
+            broadcastLobbyUpdate();
+        }
+    });
+
+    socket.on('update_location', (locationData) => {
+        if (currentUserId && players[currentUserId]) {
+            players[currentUserId].location = locationData;
+        }
+    });
+
+    socket.on('admin_start_game', () => {
+        if (isAdmin === 'true' && gameState === 'LOBBY') {
+            gameState = 'IN_PROGRESS';
+            console.log('[Admin] Гру розпочато!');
+            io.emit('game_started');
+            setTimeout(() => {
+                updateGameData();
+            }, 500);
+        }
+    });
+    
+    socket.on('admin_update_zone', (newZone) => {
+        if (isAdmin === 'true') {
+            gameZone = newZone;
+            broadcastToPlayers('force_reload', {});
+        }
+    });
+
+    socket.on('admin_broadcast_message', (message) => {
+        if (isAdmin === 'true') {
+            broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
+        }
+    });
+
+    socket.on('admin_reset_game', () => {
+        if (isAdmin === 'true') {
+            players = {};
+            gameState = 'LOBBY';
+            console.log('[Admin] Гру скинуто, лобі очищено.');
+            io.emit('game_reset');
+            broadcastLobbyUpdate();
+        }
+    });
+
+    socket.on('disconnect', () => {
+        const disconnectedPlayer = Object.values(players).find(p => p.socketId === socket.id);
+        if (disconnectedPlayer) {
+            console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' тимчасово відключився.`);
+        } else if (isAdmin === 'true') {
+            console.log(`[Disconnect] Адміністратор відключився.`);
+        }
+    });
 });
 
-function broadcastLobbyUpdate() { /* ... */ }
-function broadcastToPlayers(event, data) { /* ... */ }
-function updateGameData() { /* ... */ }
+function broadcastLobbyUpdate() {
+    const data = { gameState, players: Object.values(players), zone: gameZone };
+    io.emit('game_state_update', data);
+}
 
-// Залишаємо реалізації функцій без змін
-function getLeaveGameHandler(currentUserId) { return () => { if (currentUserId && players[currentUserId]) { console.log(`[Leave] Гравець '${players[currentUserId].name}' покинув гру.`); delete players[currentUserId]; broadcastLobbyUpdate(); } } }
-function getUpdateLocationHandler(currentUserId) { return (locationData) => { if (currentUserId && players[currentUserId]) { players[currentUserId].location = locationData; } } }
-function getAdminStartGameHandler(isAdmin) { return () => { if (isAdmin === 'true' && gameState === 'LOBBY') { gameState = 'IN_PROGRESS'; console.log('[Admin] Гру розпочато!'); io.emit('game_started'); setTimeout(() => { updateGameData(); }, 500); } } }
-function getAdminUpdateZoneHandler(isAdmin) { return (newZone) => { if (isAdmin === 'true') { gameZone = newZone; io.emit('force_reload'); } } }
-function getAdminBroadcastMessageHandler(isAdmin) { return (message) => { if (isAdmin === 'true') { broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`); } } }
-function getAdminResetGameHandler(isAdmin) { return () => { if (isAdmin === 'true') { players = {}; gameState = 'LOBBY'; console.log('[Admin] Гру скинуто, лобі очищено.'); io.emit('game_reset'); broadcastLobbyUpdate(); } } }
-function getDisconnectHandler(socket, isAdmin) { return () => { const disconnectedPlayer = Object.values(players).find(p => p.socketId === socket.id); if (disconnectedPlayer) { console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' тимчасово відключився.`); } else if (isAdmin === 'true') { console.log(`[Disconnect] Адміністратор відключився.`); } } }
+function broadcastToPlayers(event, data) {
+    Object.keys(players).forEach(pId => {
+        if(players[pId] && players[pId].socketId) {
+            io.to(players[pId].socketId).emit(event, data);
+        }
+    });
+}
+
+function updateGameData() {
+    io.to('admins').emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+    for (const pId in players) {
+        if (players[pId] && players[pId].socketId) {
+            const playerData = {
+                gameState,
+                players: [players[pId]],
+                zone: gameZone,
+            };
+            io.to(pId).emit('game_update', playerData);
+        }
+    }
+}
 
 server.listen(PORT, '0.0.0.0', () => console.log(`[Сервер] Сервер успішно запущено на порті ${PORT}`));
