@@ -25,96 +25,114 @@
     <script src="https://unpkg.com/leaflet.animatedmarker@1.0.0/src/AnimatedMarker.js"></script>
 
     <script>
-        // Блок для перехоплення будь-яких помилок
-        try {
-            const map = L.map('map').setView([50.7472, 25.3253], 13);
+        const map = L.map('map').setView([50.7472, 25.3253], 13);
+        
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri'
+        }).addTo(map);
+
+        const urlParams = new URLSearchParams(window.location.search);
+        const myUserId = urlParams.get('userId');
+
+        if (!myUserId) {
+            document.body.innerHTML = '<h1>Помилка: ID користувача не знайдено.</h1>';
+        }
+
+        const socket = io({ query: { userId: myUserId }, transports: ['websocket'] });
+
+        let myMarker = null;
+        let zonePolygon = null; // Замість zoneCircle тепер буде zonePolygon
+
+        // ДОПОМІЖНА ФУНКЦІЯ для створення координат кола
+        function createCirclePolygon(center, radius, points = 64) {
+            const latlngs = [];
+            for (let i = 0; i < points; i++) {
+                const angle = (i / points) * 360;
+                const destination = L.latLng(center).destination(radius, angle);
+                latlngs.push([destination.lat, destination.lng]);
+            }
+            return latlngs;
+        }
+
+        // Функція для малювання/оновлення зони
+        function updateZoneOnMap(zoneData) {
+            if (!zoneData) return;
+
+            const center = [zoneData.latitude, zoneData.longitude];
+            const radius = zoneData.radius;
             
-            L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-                attribution: 'Tiles &copy; Esri'
-            }).addTo(map);
+            // Створюємо координати для "дірки" в зоні
+            const holeCoords = createCirclePolygon(center, radius);
 
-            const urlParams = new URLSearchParams(window.location.search);
-            const myUserId = urlParams.get('userId');
+            // Створюємо гігантський прямокутник, що покриває світ
+            const outerBounds = [
+                [90, -180],
+                [-90, -180],
+                [-90, 180],
+                [90, 180]
+            ];
 
-            if (!myUserId) {
-                // Якщо немає ID, показуємо помилку і зупиняємо виконання
-                throw new Error("ID користувача не знайдено в URL. Будь ласка, зайдіть через додаток.");
+            if (zonePolygon) {
+                // Якщо полігон вже є, оновлюємо його координати
+                zonePolygon.setLatLngs([outerBounds, holeCoords]);
+            } else {
+                // Якщо полігона немає, створюємо його
+                zonePolygon = L.polygon([outerBounds, holeCoords], {
+                    color: '#ff0000', // Колір рамки (можна зробити прозорим)
+                    weight: 2,
+                    fillColor: '#ff0000',
+                    fillOpacity: 0.4,
+                    // Важливо, щоб події миші "проходили" крізь цей шар
+                    interactive: false 
+                }).addTo(map);
+            }
+        }
+        
+        socket.on('game_update', (data) => {
+            if (!data || !data.players || !data.zone) {
+                return;
             }
 
-            const socket = io({ query: { userId: myUserId }, transports: ['websocket'] });
+            const { players, zone } = data;
+            const me = players[0];
 
-            let myMarker = null;
-            let zoneCircle = null;
-
-            socket.on('game_update', (data) => {
-                if (!data || !data.players || !data.zone) {
-                    console.error("Отримано некоректні дані 'game_update'", data);
-                    return;
-                }
-
-                const { players, zone } = data;
-                const me = players[0];
-
-                if (me && me.location) {
-                    const latLng = [me.location.latitude, me.location.longitude];
-                    if (myMarker) {
-                        myMarker.moveTo(latLng, 2000);
-                    } else {
-                        myMarker = L.animatedMarker([latLng], {
-                            icon: L.divIcon({
-                                className: 'player-marker',
-                                html: `<div style="background-color: #2980b9; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px black;"></div>`,
-                                iconSize: [20, 20]
-                            })
-                        }).addTo(map);
-                        map.setView(latLng, 15);
-                    }
-                }
-                
-                const center = [zone.latitude, zone.longitude];
-                if (zoneCircle) {
-                    zoneCircle.setLatLng(center).setRadius(zone.radius);
+            // Оновлення маркера гравця
+            if (me && me.location) {
+                const latLng = [me.location.latitude, me.location.longitude];
+                if (myMarker) {
+                    myMarker.moveTo(latLng, 2000);
                 } else {
-                    zoneCircle = L.circle(center, { 
-                        radius: zone.radius, 
-                        color: 'red', 
-                        fillOpacity: 0.15 
+                    myMarker = L.animatedMarker([latLng], {
+                        icon: L.divIcon({
+                            className: 'player-marker',
+                            html: `<div style="background-color: #2980b9; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px black;"></div>`,
+                            iconSize: [20, 20]
+                        })
                     }).addTo(map);
+                    map.setView(latLng, 15);
                 }
-            });
+            }
             
-            // Залишаємо простий варіант з перезавантаженням
-            socket.on('force_reload', () => {
-                location.reload();
-            });
-            
-            socket.on('game_event', (message) => {
-                const eventContainer = document.getElementById('event-container');
-                const eventDiv = document.createElement('div');
-                eventDiv.className = 'event-overlay';
-                eventDiv.innerText = message;
-                eventContainer.appendChild(eventDiv);
-                setTimeout(() => eventDiv.remove(), 5000);
-            });
+            // Оновлюємо зону при кожному оновленні даних
+            updateZoneOnMap(zone);
+        });
+        
+        // Цей слухач потрібен для примусового перезавантаження, залишаємо його
+        socket.on('force_reload', () => {
+            location.reload();
+        });
+        
+        socket.on('game_event', (message) => {
+            const eventContainer = document.getElementById('event-container');
+            const eventDiv = document.createElement('div');
+            eventDiv.className = 'event-overlay';
+            eventDiv.innerText = message;
+            eventContainer.appendChild(eventDiv);
+            setTimeout(() => eventDiv.remove(), 5000);
+        });
 
-            socket.on('connect', () => console.log('Сокет успішно підключено!'));
-            socket.on('disconnect', () => console.error('Сокет відключено!'));
-
-        } catch (error) {
-            // Якщо будь-який код вище викличе помилку, вона буде показана тут
-            document.body.innerHTML = `
-                <div style="padding: 20px; font-family: sans-serif; background-color: #ffdddd; border: 2px solid red;">
-                    <h2>Сталася критична помилка на сторінці</h2>
-                    <p>Будь ласка, зробіть скріншот цього повідомлення та надішліть розробнику.</p>
-                    <hr>
-                    <p><strong>Повідомлення про помилку:</strong></p>
-                    <pre style="white-space: pre-wrap; word-wrap: break-word;">${error.message}</pre>
-                    <p><strong>Стек викликів:</strong></p>
-                    <pre style="white-space: pre-wrap; word-wrap: break-word;">${error.stack}</pre>
-                </div>
-            `;
-            console.error(error);
-        }
+        socket.on('connect', () => console.log('Сокет успішно підключено!'));
+        socket.on('disconnect', () => console.error('Сокет відключено!'));
     </script>
 </body>
 </html>
