@@ -5,7 +5,7 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 const PORT = 8080;
-const VIBRATION_INTERVAL = 30000; // 30 секунд
+const WARNING_INTERVAL = 30000; // 30 секунд
 const KICK_TIMEOUT = 600000; // 10 хвилин
 
 const app = express();
@@ -43,7 +43,6 @@ setInterval(() => {
     const now = Date.now();
     Object.values(players).forEach(player => {
         if (!player || !player.location) return;
-
         const distance = getDistance(player.location.latitude, player.location.longitude, gameZone.latitude, gameZone.longitude);
 
         if (distance > gameZone.radius) {
@@ -51,13 +50,13 @@ setInterval(() => {
                 player.isOutside = true;
                 player.outsideSince = now;
                 player.lastWarningTime = now;
-                console.log(`[Vibration] Надсилаю перше попередження гравцю ${player.name}`);
-                io.to(player.socketId).emit('vibrate_warning');
+                console.log(`[Sound] Надсилаю перше попередження гравцю ${player.name}`);
+                io.to(player.socketId).emit('zone_warning');
             }
             
-            if (now - player.lastWarningTime >= VIBRATION_INTERVAL) {
-                console.log(`[Vibration] Надсилаю повторне попередження гравцю ${player.name}`);
-                io.to(player.socketId).emit('vibrate_warning');
+            if (now - player.lastWarningTime >= WARNING_INTERVAL) {
+                console.log(`[Sound] Надсилаю повторне попередження гравцю ${player.name}`);
+                io.to(player.socketId).emit('zone_warning');
                 player.lastWarningTime = now;
             }
 
@@ -75,7 +74,6 @@ setInterval(() => {
             }
         }
     });
-
     updateGameData();
 }, 2000);
 
