@@ -5,8 +5,10 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 const PORT = 8080;
-const WARNING_INTERVAL = 30000; // 30 секунд
+const MAIN_INTERVAL = 2000; // Головний цикл сервера (2 секунди)
+const WARNING_INTERVAL = 60000; // Інтервал для попереджень (60 секунд)
 const KICK_TIMEOUT = 600000; // 10 хвилин
+const WARNING_TICKS = WARNING_INTERVAL / MAIN_INTERVAL; // Кількість "тіків" до наступного попередження (60/2 = 30)
 
 const app = express();
 const server = http.createServer(app);
@@ -27,7 +29,7 @@ let gameZone = {
 
 function getDistance(lat1, lon1, lat2, lon2) {
     if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return 0;
-    const R = 6371e3; // Радіус Землі в метрах
+    const R = 6371e3;
     const φ1 = lat1 * Math.PI / 180;
     const φ2 = lat2 * Math.PI / 180;
     const Δφ = (lat2 - lat1) * Math.PI / 180;
@@ -47,24 +49,22 @@ setInterval(() => {
         const distance = getDistance(player.location.latitude, player.location.longitude, gameZone.latitude, gameZone.longitude);
 
         if (distance > gameZone.radius) {
-            // Виправлена логіка для повторних попереджень
             if (!player.isOutside) {
-                // Гравець щойно вийшов із зони
                 player.isOutside = true;
                 player.outsideSince = now;
-                player.lastWarningTime = now;
-                console.log(`[Sound] Гравець '${player.name}' покинув зону. Надсилаю перше попередження.`);
+                player.warningTickCounter = 0;
+                console.log(`[Warning] Гравець '${player.name}' покинув зону. Надсилаю перше попередження.`);
                 io.to(player.socketId).emit('zone_warning');
-            } else {
-                // Гравець вже перебуває поза зоною, перевіряємо інтервал
-                if (now - player.lastWarningTime >= WARNING_INTERVAL) {
-                    console.log(`[Sound] Надсилаю повторне попередження гравцю ${player.name}`);
-                    io.to(player.socketId).emit('zone_warning');
-                    player.lastWarningTime = now;
-                }
             }
+            
+            player.warningTickCounter++;
 
-            // Перевірка на виключення з гри
+            if (player.warningTickCounter >= WARNING_TICKS) {
+                console.log(`[Warning] Минула хвилина. Надсилаю повторне попередження гравцю ${player.name}`);
+                io.to(player.socketId).emit('zone_warning');
+                player.warningTickCounter = 0;
+            }
+            
             if (now - player.outsideSince > KICK_TIMEOUT) {
                 io.to(player.socketId).emit('game_event', 'Ви були занадто довго поза зоною і вибули з гри!');
                 io.to(player.socketId).emit('game_reset');
@@ -72,17 +72,16 @@ setInterval(() => {
                 broadcastLobbyUpdate();
             }
         } else {
-            // Гравець повернувся в зону
             if (player.isOutside) {
                 player.isOutside = false;
                 player.outsideSince = null;
+                player.warningTickCounter = 0;
                 io.to(player.socketId).emit('game_event', 'Ви повернулись у безпечну зону!');
             }
         }
     });
-
     updateGameData();
-}, 2000);
+}, MAIN_INTERVAL);
 
 io.on('connection', (socket) => {
     const { isAdmin, userId } = socket.handshake.query;
@@ -109,7 +108,7 @@ io.on('connection', (socket) => {
             return callback({ success: false, message: 'Гра вже почалася.' });
         }
         const newPlayerId = uuidv4();
-        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, isOutside: false, outsideSince: null, lastWarningTime: 0 };
+        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, isOutside: false, outsideSince: null, warningTickCounter: 0 };
         currentUserId = newPlayerId;
         socket.join(newPlayerId);
         console.log(`[Join] Гравець '${playerName}' приєднався.`);
