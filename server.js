@@ -5,10 +5,10 @@ const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
 const PORT = 8080;
-const MAIN_INTERVAL = 2000; // Головний цикл сервера (2 секунди)
-const WARNING_INTERVAL = 60000; // Інтервал для попереджень (60 секунд)
+const MAIN_INTERVAL = 2000;
+const WARNING_INTERVAL = 60000; // 1 хвилина
 const KICK_TIMEOUT = 600000; // 10 хвилин
-const WARNING_TICKS = WARNING_INTERVAL / MAIN_INTERVAL; // Кількість "тіків" до наступного попередження (60/2 = 30)
+const WARNING_TICKS = WARNING_INTERVAL / MAIN_INTERVAL;
 
 const app = express();
 const server = http.createServer(app);
@@ -52,15 +52,13 @@ setInterval(() => {
             if (!player.isOutside) {
                 player.isOutside = true;
                 player.outsideSince = now;
-                player.warningTickCounter = 0;
-                console.log(`[Warning] Гравець '${player.name}' покинув зону. Надсилаю перше попередження.`);
-                io.to(player.socketId).emit('zone_warning');
+                player.warningTickCounter = WARNING_TICKS;
             }
             
             player.warningTickCounter++;
 
             if (player.warningTickCounter >= WARNING_TICKS) {
-                console.log(`[Warning] Минула хвилина. Надсилаю повторне попередження гравцю ${player.name}`);
+                console.log(`[Warning] Надсилаю попередження гравцю ${player.name}`);
                 io.to(player.socketId).emit('zone_warning');
                 player.warningTickCounter = 0;
             }
@@ -104,11 +102,9 @@ io.on('connection', (socket) => {
     }
 
     socket.on('join_game', (playerName, callback) => {
-        if (gameState !== 'LOBBY') {
-            return callback({ success: false, message: 'Гра вже почалася.' });
-        }
+        if (gameState !== 'LOBBY') return callback({ success: false, message: 'Гра вже почалася.' });
         const newPlayerId = uuidv4();
-        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, isOutside: false, outsideSince: null, warningTickCounter: 0 };
+        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, isOutside: false, outsideSince: null, warningTickCounter: 0, pairId: null, partnerId: null };
         currentUserId = newPlayerId;
         socket.join(newPlayerId);
         console.log(`[Join] Гравець '${playerName}' приєднався.`);
@@ -132,11 +128,69 @@ io.on('connection', (socket) => {
 
     socket.on('admin_start_game', () => {
         if (isAdmin === 'true' && gameState === 'LOBBY') {
+            const playerIds = Object.keys(players);
+            for (let i = playerIds.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [playerIds[i], playerIds[j]] = [playerIds[j], playerIds[i]];
+            }
+            
+            let pairCounter = 1;
+            for (let i = 0; i < playerIds.length; i += 2) {
+                const p1_id = playerIds[i];
+                const p2_id = playerIds[i+1];
+
+                if (p1_id && p2_id) {
+                    players[p1_id].pairId = pairCounter;
+                    players[p2_id].pairId = pairCounter;
+                    players[p1_id].partnerId = p2_id;
+                    players[p2_id].partnerId = p1_id;
+                } else if (p1_id) {
+                    players[p1_id].pairId = pairCounter;
+                }
+                pairCounter++;
+            }
+
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
             io.emit('game_started');
             setTimeout(() => updateGameData(), 500);
         }
+    });
+
+    socket.on('admin_kick_player', (playerIdToKick) => {
+        if (isAdmin === 'true' && players[playerIdToKick]) {
+            const kickedPlayerName = players[playerIdToKick].name;
+            const kickedPlayerSocketId = players[playerIdToKick].socketId;
+            if (kickedPlayerSocketId) {
+                io.to(kickedPlayerSocketId).emit('game_event', 'Адміністратор виключив вас з гри.');
+                io.to(kickedPlayerSocketId).emit('game_reset');
+            }
+            delete players[playerIdToKick];
+            broadcastLobbyUpdate();
+        }
+    });
+
+    socket.on('admin_move_player', ({ playerId, newPairId }) => {
+        if (!isAdmin || !players[playerId]) return;
+
+        const playerToMove = players[playerId];
+        const oldPartnerId = playerToMove.partnerId;
+        newPairId = newPairId === 'null' ? null : parseInt(newPairId, 10);
+
+        if (oldPartnerId && players[oldPartnerId]) {
+            players[oldPartnerId].partnerId = null;
+        }
+        playerToMove.partnerId = null;
+        
+        const newPartner = Object.values(players).find(p => p.id !== playerId && p.pairId === newPairId && !p.partnerId);
+        
+        playerToMove.pairId = newPairId;
+
+        if (newPartner) {
+            playerToMove.partnerId = newPartner.id;
+            newPartner.partnerId = playerToMove.id;
+        }
+        broadcastLobbyUpdate();
     });
 
     socket.on('admin_update_zone', (newZone) => {
@@ -151,12 +205,18 @@ io.on('connection', (socket) => {
             broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
         }
     });
-
+    
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
-            players = {};
+            Object.values(players).forEach(p => {
+                p.isOutside = false;
+                p.outsideSince = null;
+                p.warningTickCounter = 0;
+                p.pairId = null;
+                p.partnerId = null;
+            });
             gameState = 'LOBBY';
-            console.log('[Admin] Гру скинуто, лобі очищено.');
+            console.log('[Admin] Гру скинуто.');
             io.emit('game_reset');
             broadcastLobbyUpdate();
         }
@@ -186,15 +246,18 @@ function broadcastToPlayers(event, data) {
 
 function updateGameData() {
     io.to('admins').emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
-    
     const now = Date.now();
     for (const pId in players) {
         if (players[pId] && players[pId].socketId) {
             const player = players[pId];
+            const playersToSend = [player];
+            if (player.partnerId && players[player.partnerId]) {
+                playersToSend.push(players[player.partnerId]);
+            }
             const timeLeft = player.isOutside ? KICK_TIMEOUT - (now - player.outsideSince) : KICK_TIMEOUT;
             const playerData = { 
                 gameState, 
-                players: [player], 
+                players: playersToSend, 
                 zone: gameZone, 
                 zoneStatus: { 
                     isOutside: player.isOutside, 
