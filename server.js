@@ -43,23 +43,28 @@ setInterval(() => {
     const now = Date.now();
     Object.values(players).forEach(player => {
         if (!player || !player.location) return;
+
         const distance = getDistance(player.location.latitude, player.location.longitude, gameZone.latitude, gameZone.longitude);
 
         if (distance > gameZone.radius) {
+            // Виправлена логіка для повторних попереджень
             if (!player.isOutside) {
+                // Гравець щойно вийшов із зони
                 player.isOutside = true;
                 player.outsideSince = now;
                 player.lastWarningTime = now;
-                console.log(`[Sound] Надсилаю перше попередження гравцю ${player.name}`);
+                console.log(`[Sound] Гравець '${player.name}' покинув зону. Надсилаю перше попередження.`);
                 io.to(player.socketId).emit('zone_warning');
-            }
-            
-            if (now - player.lastWarningTime >= WARNING_INTERVAL) {
-                console.log(`[Sound] Надсилаю повторне попередження гравцю ${player.name}`);
-                io.to(player.socketId).emit('zone_warning');
-                player.lastWarningTime = now;
+            } else {
+                // Гравець вже перебуває поза зоною, перевіряємо інтервал
+                if (now - player.lastWarningTime >= WARNING_INTERVAL) {
+                    console.log(`[Sound] Надсилаю повторне попередження гравцю ${player.name}`);
+                    io.to(player.socketId).emit('zone_warning');
+                    player.lastWarningTime = now;
+                }
             }
 
+            // Перевірка на виключення з гри
             if (now - player.outsideSince > KICK_TIMEOUT) {
                 io.to(player.socketId).emit('game_event', 'Ви були занадто довго поза зоною і вибули з гри!');
                 io.to(player.socketId).emit('game_reset');
@@ -67,6 +72,7 @@ setInterval(() => {
                 broadcastLobbyUpdate();
             }
         } else {
+            // Гравець повернувся в зону
             if (player.isOutside) {
                 player.isOutside = false;
                 player.outsideSince = null;
@@ -74,6 +80,7 @@ setInterval(() => {
             }
         }
     });
+
     updateGameData();
 }, 2000);
 
