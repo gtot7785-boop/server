@@ -6,9 +6,9 @@ const { v4: uuidv4 } = require('uuid');
 
 const PORT = 8080;
 const MAIN_INTERVAL = 2000; // Головний цикл сервера (2 секунди)
-const WARNING_INTERVAL = 60000; // Інтервал для попереджень (60 секунд)
+const WARNING_INTERVAL = 60000; // Інтервал для попереджень (1 хвилина)
 const KICK_TIMEOUT = 600000; // 10 хвилин
-const WARNING_TICKS = WARNING_INTERVAL / MAIN_INTERVAL; // Кількість "тіків" до наступного попередження (60/2 = 30)
+const WARNING_TICKS = WARNING_INTERVAL / MAIN_INTERVAL; // Кількість "тіків" до наступного попередження
 
 const app = express();
 const server = http.createServer(app);
@@ -52,17 +52,15 @@ setInterval(() => {
             if (!player.isOutside) {
                 player.isOutside = true;
                 player.outsideSince = now;
-                player.warningTickCounter = 0;
-                console.log(`[Warning] Гравець '${player.name}' покинув зону. Надсилаю перше попередження.`);
-                io.to(player.socketId).emit('zone_warning');
+                player.warningTickCounter = WARNING_TICKS; // Гарантуємо перше попередження відразу
             }
             
             player.warningTickCounter++;
 
             if (player.warningTickCounter >= WARNING_TICKS) {
-                console.log(`[Warning] Минула хвилина. Надсилаю повторне попередження гравцю ${player.name}`);
+                console.log(`[Warning] Надсилаю попередження гравцю ${player.name}`);
                 io.to(player.socketId).emit('zone_warning');
-                player.warningTickCounter = 0;
+                player.warningTickCounter = 0; // Скидаємо лічильник для наступної хвилини
             }
             
             if (now - player.outsideSince > KICK_TIMEOUT) {
@@ -104,9 +102,7 @@ io.on('connection', (socket) => {
     }
 
     socket.on('join_game', (playerName, callback) => {
-        if (gameState !== 'LOBBY') {
-            return callback({ success: false, message: 'Гра вже почалася.' });
-        }
+        if (gameState !== 'LOBBY') return callback({ success: false, message: 'Гра вже почалася.' });
         const newPlayerId = uuidv4();
         players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, isOutside: false, outsideSince: null, warningTickCounter: 0 };
         currentUserId = newPlayerId;
@@ -151,14 +147,19 @@ io.on('connection', (socket) => {
             broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
         }
     });
-
+    
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
-            players = {};
+            // Скидаємо стан зони для всіх гравців, які є в лобі
+            Object.values(players).forEach(p => {
+                p.isOutside = false;
+                p.outsideSince = null;
+                p.warningTickCounter = 0;
+            });
             gameState = 'LOBBY';
-            console.log('[Admin] Гру скинуто, лобі очищено.');
-            io.emit('game_reset');
-            broadcastLobbyUpdate();
+            console.log('[Admin] Гру скинуто. Стан гравців очищено.');
+            io.emit('game_reset'); // Команда клієнтам повернутись в лобі
+            broadcastLobbyUpdate(); // Оновлення списку гравців
         }
     });
 
@@ -186,7 +187,6 @@ function broadcastToPlayers(event, data) {
 
 function updateGameData() {
     io.to('admins').emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
-    
     const now = Date.now();
     for (const pId in players) {
         if (players[pId] && players[pId].socketId) {
