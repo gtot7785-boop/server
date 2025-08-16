@@ -44,6 +44,8 @@
             <button id="broadcast-btn">Надіслати</button>
         </div>
         <hr>
+        <button id="add-team-btn" style="background-color: #5bc0de;">Додати нову команду</button>
+        <hr>
         <h4>Гравці (<span id="player-count">0</span>):</h4>
         <ul id="player-list"></ul>
     </div>
@@ -67,6 +69,7 @@
         const radiusInput = document.getElementById('zone-radius');
         const broadcastBtn = document.getElementById('broadcast-btn');
         const broadcastMsg = document.getElementById('broadcast-msg');
+        const addTeamBtn = document.getElementById('add-team-btn');
         const teamColors = ['#3498db', '#2ecc71', '#f1c40f', '#e74c3c', '#9b59b6', '#34495e', '#1abc9c', '#e67e22', '#d35400', '#c0392b'];
 
         let currentZone = null;
@@ -75,6 +78,7 @@
 
         startGameBtn.onclick = () => socket.emit('admin_start_game');
         resetGameBtn.onclick = () => { if (confirm('Ви впевнені?')) socket.emit('admin_reset_game'); };
+        addTeamBtn.onclick = () => socket.emit('admin_add_team');
         updateZoneBtn.onclick = () => {
             const newRadius = parseInt(radiusInput.value, 10);
             if (currentZone && newRadius > 0) socket.emit('admin_update_zone', { ...currentZone, radius: newRadius });
@@ -103,7 +107,7 @@
         });
 
         socket.on('game_state_update', (data) => {
-            const { gameState, players, zone } = data;
+            const { gameState, players, zone, teamCount } = data;
             currentZone = zone;
 
             gameStatusEl.innerText = gameState;
@@ -113,13 +117,14 @@
             playerCountSpan.innerText = players.length;
             playerListUl.innerHTML = '';
             
-            const maxPairs = Math.ceil(players.length / 2) + 2;
+            const maxPairs = Math.max(teamCount, Math.ceil(players.length / 2) + 2);
             const currentPlayerIds = new Set(players.map(p => p.id));
 
             players.sort((a, b) => (a.pairId || maxPairs + 1) - (b.pairId || maxPairs + 1) || a.name.localeCompare(b.name));
 
             players.forEach(player => {
                 const li = document.createElement('li');
+                const isSeeker = player.role === 'seeker' ? ' 👁️' : '';
                 
                 let selectOptions = `<option value="null">Без команди</option>`;
                 for (let i = 1; i <= maxPairs; i++) {
@@ -130,14 +135,13 @@
                 const kickButton = `<button class="kick-btn" data-id="${player.id}" data-name="${player.name}">Вигнати</button>`;
                 
                 li.innerHTML = `
-                    <div style="display: flex; align-items: center;"><span>${player.name}</span></div>
+                    <div style="display: flex; align-items: center;"><span>${player.name}<b>${isSeeker}</b></span></div>
                     <div style="display: flex; align-items: center;">${pairSelect}${kickButton}</div>
                 `;
                 
                 if (player.pairId) {
                     li.style.backgroundColor = teamColors[player.pairId % teamColors.length] + '33';
                 }
-
                 playerListUl.appendChild(li);
 
                 if (player.location) {

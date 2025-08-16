@@ -38,39 +38,29 @@
             document.body.innerHTML = '<h1>Помилка: ID користувача не знайдено.</h1>';
         }
 
-        // !!! ДОДАНО КОД, ЯКОГО НЕ ВИСТАЧАЛО !!!
-        // Цей блок додає до Leaflet відсутню функцію для розрахунку точки на відстані.
-        // Тепер помилки не буде.
         L.LatLng.prototype.destination = function(bearing, distance) {
-            const R = 6378137; // Радіус Землі в метрах
+            const R = 6378137;
             const toRad = Math.PI / 180;
             const toBrng = bearing * toRad;
             const lat1 = this.lat * toRad;
             const lon1 = this.lng * toRad;
-
-            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distance / R) +
-                                 Math.cos(lat1) * Math.sin(distance / R) * Math.cos(toBrng));
-            
-            let lon2 = lon1 + Math.atan2(Math.sin(toBrng) * Math.sin(distance / R) * Math.cos(lat1),
-                                      Math.cos(distance / R) - Math.sin(lat1) * Math.sin(lat2));
-            
+            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distance / R) + Math.cos(lat1) * Math.sin(distance / R) * Math.cos(toBrng));
+            let lon2 = lon1 + Math.atan2(Math.sin(toBrng) * Math.sin(distance / R) * Math.cos(lat1), Math.cos(distance / R) - Math.sin(lat1) * Math.sin(lat2));
             const toDeg = 180 / Math.PI;
             lon2 = (lon2 * toDeg + 540) % 360 - 180;
-
             return L.latLng(lat2 * toDeg, lon2);
         };
-        // Кінець доданого блоку
 
         const socket = io({ query: { userId: myUserId }, transports: ['websocket'] });
 
         let myMarker = null;
+        let partnerMarker = null;
         let zonePolygon = null;
 
         function createCirclePolygon(center, radius, points = 64) {
             const latlngs = [];
             for (let i = 0; i < points; i++) {
                 const angle = (i / points) * 360;
-                // Тепер ця функція буде працювати
                 const destination = L.latLng(center).destination(angle, radius);
                 latlngs.push([destination.lat, destination.lng]);
             }
@@ -79,54 +69,62 @@
 
         function updateZoneOnMap(zoneData) {
             if (!zoneData) return;
-
             const center = [zoneData.latitude, zoneData.longitude];
             const radius = zoneData.radius;
             const holeCoords = createCirclePolygon(center, radius);
-            const outerBounds = [
-                [90, -180], [-90, -180], [-90, 180], [90, 180]
-            ];
-
+            const outerBounds = [ [90, -180], [-90, -180], [-90, 180], [90, 180] ];
             if (zonePolygon) {
                 zonePolygon.setLatLngs([outerBounds, holeCoords]);
             } else {
-                zonePolygon = L.polygon([outerBounds, holeCoords], {
-                    color: 'red',
-                    weight: 2,
-                    fillColor: 'red',
-                    fillOpacity: 0.4,
-                    interactive: false 
-                }).addTo(map);
+                zonePolygon = L.polygon([outerBounds, holeCoords], { color: 'red', weight: 2, fillColor: 'red', fillOpacity: 0.4, interactive: false }).addTo(map);
             }
         }
         
         socket.on('game_update', (data) => {
             if (!data || !data.players || !data.zone) return;
-
             const { players, zone } = data;
-            const me = players[0];
+            
+            const me = players.find(p => p.id === myUserId);
+            const partner = players.find(p => p.id !== myUserId);
 
             if (me && me.location) {
                 const latLng = [me.location.latitude, me.location.longitude];
                 if (myMarker) {
-                    myMarker.moveTo(latLng, 2000);
+                    myMarker.setLatLng(latLng);
                 } else {
-                    myMarker = L.animatedMarker([latLng], {
+                    myMarker = L.marker(latLng, {
                         icon: L.divIcon({
                             className: 'player-marker',
                             html: `<div style="background-color: #2980b9; width: 20px; height: 20px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 5px black;"></div>`,
                             iconSize: [20, 20]
                         })
-                    }).addTo(map);
+                    }).addTo(map).bindPopup("Це я");
                     map.setView(latLng, 15);
                 }
             }
+
+            if (partner && partner.location) {
+                const latLng = [partner.location.latitude, partner.location.longitude];
+                if (partnerMarker) {
+                    partnerMarker.setLatLng(latLng);
+                } else {
+                    partnerMarker = L.marker(latLng, {
+                        icon: L.divIcon({
+                            className: 'partner-marker',
+                            html: `<div style="background-color: #2ecc71; width: 18px; height: 18px; border-radius: 50%; border: 2px solid white;"></div>`,
+                            iconSize: [18, 18]
+                        })
+                    }).addTo(map).bindPopup(partner.name);
+                }
+            } else if (partnerMarker) {
+                map.removeLayer(partnerMarker);
+                partnerMarker = null;
+            }
+
             updateZoneOnMap(zone);
         });
         
-        socket.on('force_reload', () => {
-            location.reload();
-        });
+        socket.on('force_reload', () => { location.reload(); });
         
         socket.on('game_event', (message) => {
             const eventContainer = document.getElementById('event-container');

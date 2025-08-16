@@ -6,8 +6,8 @@ const { v4: uuidv4 } = require('uuid');
 
 const PORT = 8080;
 const MAIN_INTERVAL = 2000;
-const WARNING_INTERVAL = 60000; // 1 хвилина
-const KICK_TIMEOUT = 600000; // 10 хвилин
+const WARNING_INTERVAL = 60000;
+const KICK_TIMEOUT = 600000;
 const WARNING_TICKS = WARNING_INTERVAL / MAIN_INTERVAL;
 
 const app = express();
@@ -21,11 +21,8 @@ app.get('/player.html', (req, res) => res.sendFile(path.join(__dirname, 'player.
 
 let players = {};
 let gameState = 'LOBBY';
-let gameZone = {
-  latitude: 50.7472,
-  longitude: 25.3253,
-  radius: 5000,
-};
+let gameZone = { latitude: 50.7472, longitude: 25.3253, radius: 5000 };
+let teamCount = 0;
 
 function getDistance(lat1, lon1, lat2, lon2) {
     if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return 0;
@@ -88,13 +85,13 @@ io.on('connection', (socket) => {
     if (isAdmin === 'true') {
         socket.join('admins');
         console.log(`[Connect] Адміністратор підключився.`);
-        socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+        socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone, teamCount });
     }
     else if (currentUserId && players[currentUserId]) {
         players[currentUserId].socketId = socket.id;
         socket.join(currentUserId);
         console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
-        socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+        socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone, teamCount });
     } 
     else if (currentUserId && !players[currentUserId]) {
         console.log(`[Invalid ID] Гравець з недійсним ID '${currentUserId}' спробував підключитись. Скидаємо.`);
@@ -104,17 +101,15 @@ io.on('connection', (socket) => {
     socket.on('join_game', (playerName, callback) => {
         if (gameState !== 'LOBBY') return callback({ success: false, message: 'Гра вже почалася.' });
         const newPlayerId = uuidv4();
-        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, isOutside: false, outsideSince: null, warningTickCounter: 0, pairId: null, partnerId: null };
+        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, isOutside: false, outsideSince: null, warningTickCounter: 0, pairId: null, partnerId: null, role: 'hider' };
         currentUserId = newPlayerId;
         socket.join(newPlayerId);
-        console.log(`[Join] Гравець '${playerName}' приєднався.`);
         callback({ success: true, userId: newPlayerId });
         broadcastLobbyUpdate();
     });
     
     socket.on('leave_game', () => {
         if (currentUserId && players[currentUserId]) {
-            console.log(`[Leave] Гравець '${players[currentUserId].name}' покинув гру.`);
             delete players[currentUserId];
             broadcastLobbyUpdate();
         }
@@ -129,6 +124,8 @@ io.on('connection', (socket) => {
     socket.on('admin_start_game', () => {
         if (isAdmin === 'true' && gameState === 'LOBBY') {
             const playerIds = Object.keys(players);
+            if(playerIds.length === 0) return;
+
             for (let i = playerIds.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [playerIds[i], playerIds[j]] = [playerIds[j], playerIds[i]];
@@ -149,6 +146,15 @@ io.on('connection', (socket) => {
                 }
                 pairCounter++;
             }
+            teamCount = pairCounter - 1;
+
+            const allPairIds = [...new Set(Object.values(players).map(p => p.pairId).filter(id => id !== null))];
+            if (allPairIds.length > 0) {
+                const seekerPairId = allPairIds[Math.floor(Math.random() * allPairIds.length)];
+                Object.values(players).forEach(p => {
+                    if (p.pairId === seekerPairId) p.role = 'seeker';
+                });
+            }
 
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
@@ -159,7 +165,6 @@ io.on('connection', (socket) => {
 
     socket.on('admin_kick_player', (playerIdToKick) => {
         if (isAdmin === 'true' && players[playerIdToKick]) {
-            const kickedPlayerName = players[playerIdToKick].name;
             const kickedPlayerSocketId = players[playerIdToKick].socketId;
             if (kickedPlayerSocketId) {
                 io.to(kickedPlayerSocketId).emit('game_event', 'Адміністратор виключив вас з гри.');
@@ -177,9 +182,7 @@ io.on('connection', (socket) => {
         const oldPartnerId = playerToMove.partnerId;
         newPairId = newPairId === 'null' ? null : parseInt(newPairId, 10);
 
-        if (oldPartnerId && players[oldPartnerId]) {
-            players[oldPartnerId].partnerId = null;
-        }
+        if (oldPartnerId && players[oldPartnerId]) players[oldPartnerId].partnerId = null;
         playerToMove.partnerId = null;
         
         const newPartner = Object.values(players).find(p => p.id !== playerId && p.pairId === newPairId && !p.partnerId);
@@ -191,6 +194,13 @@ io.on('connection', (socket) => {
             newPartner.partnerId = playerToMove.id;
         }
         broadcastLobbyUpdate();
+    });
+
+    socket.on('admin_add_team', () => {
+        if (isAdmin === 'true') {
+            teamCount++;
+            broadcastLobbyUpdate();
+        }
     });
 
     socket.on('admin_update_zone', (newZone) => {
@@ -214,8 +224,10 @@ io.on('connection', (socket) => {
                 p.warningTickCounter = 0;
                 p.pairId = null;
                 p.partnerId = null;
+                p.role = 'hider';
             });
             gameState = 'LOBBY';
+            teamCount = 0;
             console.log('[Admin] Гру скинуто.');
             io.emit('game_reset');
             broadcastLobbyUpdate();
@@ -224,28 +236,22 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         const disconnectedPlayer = Object.values(players).find(p => p.socketId === socket.id);
-        if (disconnectedPlayer) {
-            console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' тимчасово відключився.`);
-        } else if (isAdmin === 'true') {
-            console.log(`[Disconnect] Адміністратор відключився.`);
-        }
+        if (disconnectedPlayer) console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' тимчасово відключився.`);
     });
 });
 
 function broadcastLobbyUpdate() {
-    io.emit('game_state_update', { gameState, players: Object.values(players) });
+    io.emit('game_state_update', { gameState, players: Object.values(players), teamCount });
 }
 
 function broadcastToPlayers(event, data) {
     Object.keys(players).forEach(pId => {
-        if(players[pId] && players[pId].socketId) {
-            io.to(players[pId].socketId).emit(event, data);
-        }
+        if(players[pId] && players[pId].socketId) io.to(players[pId].socketId).emit(event, data);
     });
 }
 
 function updateGameData() {
-    io.to('admins').emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone });
+    io.to('admins').emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone, teamCount });
     const now = Date.now();
     for (const pId in players) {
         if (players[pId] && players[pId].socketId) {
@@ -259,10 +265,7 @@ function updateGameData() {
                 gameState, 
                 players: playersToSend, 
                 zone: gameZone, 
-                zoneStatus: { 
-                    isOutside: player.isOutside, 
-                    timeLeft: timeLeft > 0 ? timeLeft : 0 
-                }
+                zoneStatus: { isOutside: player.isOutside, timeLeft: timeLeft > 0 ? timeLeft : 0 }
             };
             io.to(pId).emit('game_update', playerData);
         }
