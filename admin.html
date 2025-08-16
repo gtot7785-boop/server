@@ -98,6 +98,7 @@
                 const playerName = target.dataset.name;
                 if (confirm(`Вигнати гравця ${playerName}?`)) socket.emit('admin_kick_player', playerId);
             }
+            // Ось обробник для іконки ока
             if (target.classList.contains('role-btn')) {
                 const playerId = target.dataset.id;
                 socket.emit('admin_set_seeker', playerId);
@@ -128,7 +129,7 @@
             players.forEach(player => {
                 const li = document.createElement('li');
                 
-                // --- Ось код, який додає іконку та статус ---
+                // Ось код, який створює іконку та статус
                 const roleIcon = `<span class="role-btn" data-id="${player.id}" title="Призначити шукачем">👁️</span>`;
                 const playerNameHTML = `<span>${player.name} ${player.role === 'seeker' ? '<b>(Шукач)</b>' : ''}</span>`;
                 
