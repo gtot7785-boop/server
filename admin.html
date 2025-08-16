@@ -127,6 +127,8 @@
 
             players.forEach(player => {
                 const li = document.createElement('li');
+                
+                // --- Ось код, який додає іконку та статус ---
                 const roleIcon = `<span class="role-btn" data-id="${player.id}" title="Призначити шукачем">👁️</span>`;
                 const playerNameHTML = `<span>${player.name} ${player.role === 'seeker' ? '<b>(Шукач)</b>' : ''}</span>`;
                 
