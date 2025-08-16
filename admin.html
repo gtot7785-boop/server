@@ -21,8 +21,10 @@
         #update-zone-btn, #broadcast-btn { background-color: #007bff; }
         input[type="number"], input[type="text"] { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
         hr { border: none; border-top: 1px solid #ddd; margin: 15px 0; }
+        .player-controls { display: flex; align-items: center; }
         .kick-btn { background-color: #e74c3c; color: white; border: none; padding: 4px 8px; font-size: 12px; cursor: pointer; border-radius: 4px; margin-left: 8px; }
         .pair-select { margin-right: 8px; }
+        .role-btn { cursor: pointer; margin-right: 8px; font-size: 16px; user-select: none; }
     </style>
 </head>
 <body>
@@ -56,9 +58,8 @@
     <script>
         const map = L.map('map').setView([50.7472, 25.3253], 13);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-
         const socket = io({ query: { isAdmin: 'true' } });
-
+        
         const gameStatusEl = document.getElementById('game-status');
         const playerCountSpan = document.getElementById('player-count');
         const playerListUl = document.getElementById('player-list');
@@ -91,10 +92,15 @@
         };
 
         playerListUl.addEventListener('click', (event) => {
-            if (event.target.classList.contains('kick-btn')) {
-                const playerId = event.target.dataset.id;
-                const playerName = event.target.dataset.name;
+            const target = event.target;
+            if (target.classList.contains('kick-btn')) {
+                const playerId = target.dataset.id;
+                const playerName = target.dataset.name;
                 if (confirm(`Вигнати гравця ${playerName}?`)) socket.emit('admin_kick_player', playerId);
+            }
+            if (target.classList.contains('role-btn')) {
+                const playerId = target.dataset.id;
+                socket.emit('admin_set_seeker', playerId);
             }
         });
 
@@ -109,22 +115,20 @@
         socket.on('game_state_update', (data) => {
             const { gameState, players, zone, teamCount } = data;
             currentZone = zone;
-
             gameStatusEl.innerText = gameState;
             startGameBtn.disabled = gameState === 'IN_PROGRESS';
             gameControls.style.display = (gameState === 'IN_PROGRESS') ? 'block' : 'none';
-
             playerCountSpan.innerText = players.length;
             playerListUl.innerHTML = '';
             
-            const maxPairs = Math.max(teamCount, Math.ceil(players.length / 2) + 2);
+            const maxPairs = Math.max(teamCount || 0, Math.ceil(players.length / 2) + 2);
             const currentPlayerIds = new Set(players.map(p => p.id));
-
             players.sort((a, b) => (a.pairId || maxPairs + 1) - (b.pairId || maxPairs + 1) || a.name.localeCompare(b.name));
 
             players.forEach(player => {
                 const li = document.createElement('li');
-                const isSeeker = player.role === 'seeker' ? ' 👁️' : '';
+                const roleIcon = `<span class="role-btn" data-id="${player.id}" title="Призначити шукачем">👁️</span>`;
+                const playerNameHTML = `<span>${player.name} ${player.role === 'seeker' ? '<b>(Шукач)</b>' : ''}</span>`;
                 
                 let selectOptions = `<option value="null">Без команди</option>`;
                 for (let i = 1; i <= maxPairs; i++) {
@@ -135,42 +139,29 @@
                 const kickButton = `<button class="kick-btn" data-id="${player.id}" data-name="${player.name}">Вигнати</button>`;
                 
                 li.innerHTML = `
-                    <div style="display: flex; align-items: center;"><span>${player.name}<b>${isSeeker}</b></span></div>
-                    <div style="display: flex; align-items: center;">${pairSelect}${kickButton}</div>
+                    <div style="display: flex; align-items: center;">${roleIcon}${playerNameHTML}</div>
+                    <div class="player-controls">${pairSelect}${kickButton}</div>
                 `;
                 
-                if (player.pairId) {
-                    li.style.backgroundColor = teamColors[player.pairId % teamColors.length] + '33';
-                }
+                if (player.pairId) li.style.backgroundColor = teamColors[player.pairId % teamColors.length] + '33';
                 playerListUl.appendChild(li);
 
                 if (player.location) {
                     const latLng = [player.location.latitude, player.location.longitude];
-                    if (playerMarkers[player.id]) {
-                        playerMarkers[player.id].setLatLng(latLng);
-                    } else {
-                        const newMarker = L.marker(latLng).bindPopup(player.name);
-                        playerMarkers[player.id] = newMarker;
-                        newMarker.addTo(map);
-                    }
+                    if (playerMarkers[player.id]) playerMarkers[player.id].setLatLng(latLng);
+                    else playerMarkers[player.id] = L.marker(latLng).addTo(map).bindPopup(player.name);
                 }
             });
 
             for (const pId in playerMarkers) {
-                if (!currentPlayerIds.has(pId)) {
-                    map.removeLayer(playerMarkers[pId]);
-                    delete playerMarkers[pId];
-                }
+                if (!currentPlayerIds.has(pId)) { map.removeLayer(playerMarkers[pId]); delete playerMarkers[pId]; }
             }
 
             if (zone) {
                 if (document.activeElement !== radiusInput) radiusInput.value = zone.radius;
                 const center = [zone.latitude, zone.longitude];
-                if (zoneCircle) {
-                    zoneCircle.setLatLng(center).setRadius(zone.radius);
-                } else {
-                    zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
-                }
+                if (zoneCircle) zoneCircle.setLatLng(center).setRadius(zone.radius);
+                else zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
             }
         });
     </script>

@@ -126,11 +126,11 @@ io.on('connection', (socket) => {
             const playerIds = Object.keys(players);
             if(playerIds.length === 0) return;
 
+            // Створення пар залишається, але без призначення ролі
             for (let i = playerIds.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [playerIds[i], playerIds[j]] = [playerIds[j], playerIds[i]];
             }
-            
             let pairCounter = 1;
             for (let i = 0; i < playerIds.length; i += 2) {
                 const p1_id = playerIds[i];
@@ -148,18 +148,30 @@ io.on('connection', (socket) => {
             }
             teamCount = pairCounter - 1;
 
-            const allPairIds = [...new Set(Object.values(players).map(p => p.pairId).filter(id => id !== null))];
-            if (allPairIds.length > 0) {
-                const seekerPairId = allPairIds[Math.floor(Math.random() * allPairIds.length)];
-                Object.values(players).forEach(p => {
-                    if (p.pairId === seekerPairId) p.role = 'seeker';
-                });
-            }
-
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
             io.emit('game_started');
             setTimeout(() => updateGameData(), 500);
+        }
+    });
+
+    socket.on('admin_set_seeker', (playerId) => {
+        if (isAdmin === 'true' && players[playerId]) {
+            const targetPairId = players[playerId].pairId;
+            
+            // Спочатку робимо всіх "тими, хто ховається"
+            Object.values(players).forEach(p => p.role = 'hider');
+            
+            // Призначаємо шукачами всю команду обраного гравця
+            if (targetPairId) {
+                Object.values(players).forEach(p => {
+                    if (p.pairId === targetPairId) p.role = 'seeker';
+                });
+            } else {
+                players[playerId].role = 'seeker';
+            }
+            
+            broadcastLobbyUpdate();
         }
     });
 
@@ -177,7 +189,6 @@ io.on('connection', (socket) => {
 
     socket.on('admin_move_player', ({ playerId, newPairId }) => {
         if (!isAdmin || !players[playerId]) return;
-
         const playerToMove = players[playerId];
         const oldPartnerId = playerToMove.partnerId;
         newPairId = newPairId === 'null' ? null : parseInt(newPairId, 10);
@@ -186,7 +197,6 @@ io.on('connection', (socket) => {
         playerToMove.partnerId = null;
         
         const newPartner = Object.values(players).find(p => p.id !== playerId && p.pairId === newPairId && !p.partnerId);
-        
         playerToMove.pairId = newPairId;
 
         if (newPartner) {
@@ -219,12 +229,8 @@ io.on('connection', (socket) => {
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
             Object.values(players).forEach(p => {
-                p.isOutside = false;
-                p.outsideSince = null;
-                p.warningTickCounter = 0;
-                p.pairId = null;
-                p.partnerId = null;
-                p.role = 'hider';
+                p.isOutside = false; p.outsideSince = null; p.warningTickCounter = 0;
+                p.pairId = null; p.partnerId = null; p.role = 'hider';
             });
             gameState = 'LOBBY';
             teamCount = 0;
