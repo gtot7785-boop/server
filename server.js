@@ -38,10 +38,10 @@ function getDistance(lat1, lon1, lat2, lon2) {
 }
 
 function getProximityLevel(distance) {
-    if (distance < 50) return 3;
-    if (distance < 150) return 2;
-    if (distance < 300) return 1;
-    return 0;
+    if (distance < 50) return 3;  // Дуже близько
+    if (distance < 150) return 2; // Близько
+    if (distance < 300) return 1; // Далеко
+    return 0;                     // Немає сигналу
 }
 
 setInterval(() => {
@@ -139,16 +139,10 @@ io.on('connection', (socket) => {
         }
     });
 
-    // ######### ОСНОВНЕ ВИПРАВЛЕННЯ ТУТ #########
     socket.on('admin_start_game', () => {
         if (isAdmin === 'true' && gameState === 'LOBBY') {
             const playerList = Object.values(players);
             if (playerList.length === 0) return;
-
-            // ВИДАЛЕНО СТАРУ ЛОГІКУ ПЕРЕТАСОВКИ І СТВОРЕННЯ КОМАНД.
-            // Тепер команди, які адмін налаштував у лобі, зберігаються.
-
-            // Оновлюємо загальну кількість команд на основі існуючих даних
             let maxPairId = 0;
             playerList.forEach(p => {
                 if (p.pairId && p.pairId > maxPairId) {
@@ -156,15 +150,13 @@ io.on('connection', (socket) => {
                 }
             });
             teamCount = maxPairId;
-
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
             io.emit('game_started');
-            scheduleNextHint(); // Запускаємо цикл підказок
+            scheduleNextHint();
             setTimeout(() => updateGameData(), 500);
         }
     });
-    // #############################################
 
     socket.on('admin_set_seeker', (playerId) => {
         if (isAdmin === 'true' && players[playerId]) {
