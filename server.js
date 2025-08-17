@@ -110,7 +110,7 @@ io.on('connection', (socket) => {
         socket.join(currentUserId);
         console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone, teamCount });
-    } 
+    }
     else if (currentUserId && !players[currentUserId]) {
         console.log(`[Invalid ID] Гравець з недійсним ID '${currentUserId}' спробував підключитись. Скидаємо.`);
         socket.emit('game_reset');
@@ -125,7 +125,7 @@ io.on('connection', (socket) => {
         callback({ success: true, userId: newPlayerId });
         broadcastLobbyUpdate();
     });
-    
+
     socket.on('leave_game', () => {
         if (currentUserId && players[currentUserId]) {
             delete players[currentUserId];
@@ -143,6 +143,7 @@ io.on('connection', (socket) => {
         if (isAdmin === 'true' && gameState === 'LOBBY') {
             const playerList = Object.values(players);
             if (playerList.length === 0) return;
+
             let maxPairId = 0;
             playerList.forEach(p => {
                 if (p.pairId && p.pairId > maxPairId) {
@@ -150,6 +151,7 @@ io.on('connection', (socket) => {
                 }
             });
             teamCount = maxPairId;
+
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
             io.emit('game_started');
@@ -220,7 +222,7 @@ io.on('connection', (socket) => {
             broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
         }
     });
-    
+
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
             if (hintTimeout) clearTimeout(hintTimeout);
@@ -271,7 +273,7 @@ function updateGameData() {
                     nearestHiderId = hider.id;
                 }
             });
-            
+
             if (nearestHiderId) {
                 const level = getProximityLevel(minDistance);
                 players[nearestHiderId].dangerLevel = Math.max(players[nearestHiderId].dangerLevel, level);
@@ -287,11 +289,11 @@ function updateGameData() {
                 playersToSend.push(players[player.partnerId]);
             }
             const timeLeft = player.isOutside ? KICK_TIMEOUT - (now - player.outsideSince) : KICK_TIMEOUT;
-            
-            const playerData = { 
-                gameState, 
-                players: playersToSend, 
-                zone: gameZone, 
+
+            const playerData = {
+                gameState,
+                players: playersToSend,
+                zone: gameZone,
                 zoneStatus: { isOutside: player.isOutside, timeLeft: timeLeft > 0 ? timeLeft : 0 },
                 dangerLevel: player.dangerLevel
             };
