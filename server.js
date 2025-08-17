@@ -23,6 +23,7 @@ let players = {};
 let gameState = 'LOBBY';
 let gameZone = { latitude: 50.7472, longitude: 25.3253, radius: 5000 };
 let teamCount = 0;
+let hintTimeout = null;
 
 function getDistance(lat1, lon1, lat2, lon2) {
     if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return 0;
@@ -36,30 +37,31 @@ function getDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
+// НОВА ФУНКЦІЯ: ВИЗНАЧЕННЯ РІВНЯ ЗАГРОЗИ
+function getProximityLevel(distance) {
+    if (distance < 50) return 3;  // Дуже близько
+    if (distance < 150) return 2; // Близько
+    if (distance < 300) return 1; // Далеко
+    return 0;                     // Немає сигналу
+}
+
 setInterval(() => {
     if (gameState !== 'IN_PROGRESS') return;
-    
     const now = Date.now();
     Object.values(players).forEach(player => {
         if (!player || !player.location) return;
-
         const distance = getDistance(player.location.latitude, player.location.longitude, gameZone.latitude, gameZone.longitude);
-
         if (distance > gameZone.radius) {
             if (!player.isOutside) {
                 player.isOutside = true;
                 player.outsideSince = now;
                 player.warningTickCounter = WARNING_TICKS;
             }
-            
             player.warningTickCounter++;
-
             if (player.warningTickCounter >= WARNING_TICKS) {
-                console.log(`[Warning] Надсилаю попередження гравцю ${player.name}`);
                 io.to(player.socketId).emit('zone_warning');
                 player.warningTickCounter = 0;
             }
-            
             if (now - player.outsideSince > KICK_TIMEOUT) {
                 io.to(player.socketId).emit('game_event', 'Ви були занадто довго поза зоною і вибули з гри!');
                 io.to(player.socketId).emit('game_reset');
@@ -77,6 +79,23 @@ setInterval(() => {
     });
     updateGameData();
 }, MAIN_INTERVAL);
+
+function scheduleNextHint() {
+    if (gameState !== 'IN_PROGRESS') return;
+    const randomDelay = Math.floor(Math.random() * (180000 - 90000 + 1)) + 90000;
+    console.log(`[Hint] Наступна підказка буде через ${Math.round(randomDelay / 1000)} секунд.`);
+    hintTimeout = setTimeout(() => {
+        const seekers = Object.values(players).filter(p => p.role === 'seeker');
+        const hiders = Object.values(players).filter(p => p.role === 'hider' && p.location);
+        if (seekers.length > 0 && hiders.length > 0) {
+            const randomHider = hiders[Math.floor(Math.random() * hiders.length)];
+            console.log(`[Hint] Генерую підказку на гравця ${randomHider.name}`);
+            const hintData = { latitude: randomHider.location.latitude, longitude: randomHider.location.longitude };
+            seekers.forEach(seeker => io.to(seeker.socketId).emit('game_hint', hintData));
+        }
+        scheduleNextHint();
+    }, randomDelay);
+}
 
 io.on('connection', (socket) => {
     const { isAdmin, userId } = socket.handshake.query;
@@ -101,7 +120,7 @@ io.on('connection', (socket) => {
     socket.on('join_game', (playerName, callback) => {
         if (gameState !== 'LOBBY') return callback({ success: false, message: 'Гра вже почалася.' });
         const newPlayerId = uuidv4();
-        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, isOutside: false, outsideSince: null, warningTickCounter: 0, pairId: null, partnerId: null, role: 'hider' };
+        players[newPlayerId] = { id: newPlayerId, name: playerName, socketId: socket.id, location: null, isOutside: false, outsideSince: null, warningTickCounter: 0, pairId: null, partnerId: null, role: 'hider', dangerLevel: 0 };
         currentUserId = newPlayerId;
         socket.join(newPlayerId);
         callback({ success: true, userId: newPlayerId });
@@ -125,8 +144,7 @@ io.on('connection', (socket) => {
         if (isAdmin === 'true' && gameState === 'LOBBY') {
             const playerIds = Object.keys(players);
             if(playerIds.length === 0) return;
-
-            // Створення пар залишається, але без призначення ролі
+            
             for (let i = playerIds.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
                 [playerIds[i], playerIds[j]] = [playerIds[j], playerIds[i]];
@@ -135,7 +153,6 @@ io.on('connection', (socket) => {
             for (let i = 0; i < playerIds.length; i += 2) {
                 const p1_id = playerIds[i];
                 const p2_id = playerIds[i+1];
-
                 if (p1_id && p2_id) {
                     players[p1_id].pairId = pairCounter;
                     players[p2_id].pairId = pairCounter;
@@ -147,10 +164,10 @@ io.on('connection', (socket) => {
                 pairCounter++;
             }
             teamCount = pairCounter - 1;
-
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
             io.emit('game_started');
+            scheduleNextHint();
             setTimeout(() => updateGameData(), 500);
         }
     });
@@ -158,11 +175,7 @@ io.on('connection', (socket) => {
     socket.on('admin_set_seeker', (playerId) => {
         if (isAdmin === 'true' && players[playerId]) {
             const targetPairId = players[playerId].pairId;
-            
-            // Спочатку робимо всіх "тими, хто ховається"
             Object.values(players).forEach(p => p.role = 'hider');
-            
-            // Призначаємо шукачами всю команду обраного гравця
             if (targetPairId) {
                 Object.values(players).forEach(p => {
                     if (p.pairId === targetPairId) p.role = 'seeker';
@@ -170,7 +183,6 @@ io.on('connection', (socket) => {
             } else {
                 players[playerId].role = 'seeker';
             }
-            
             broadcastLobbyUpdate();
         }
     });
@@ -192,13 +204,10 @@ io.on('connection', (socket) => {
         const playerToMove = players[playerId];
         const oldPartnerId = playerToMove.partnerId;
         newPairId = newPairId === 'null' ? null : parseInt(newPairId, 10);
-
         if (oldPartnerId && players[oldPartnerId]) players[oldPartnerId].partnerId = null;
         playerToMove.partnerId = null;
-        
         const newPartner = Object.values(players).find(p => p.id !== playerId && p.pairId === newPairId && !p.partnerId);
         playerToMove.pairId = newPairId;
-
         if (newPartner) {
             playerToMove.partnerId = newPartner.id;
             newPartner.partnerId = playerToMove.id;
@@ -228,9 +237,10 @@ io.on('connection', (socket) => {
     
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
+            if (hintTimeout) clearTimeout(hintTimeout);
             Object.values(players).forEach(p => {
                 p.isOutside = false; p.outsideSince = null; p.warningTickCounter = 0;
-                p.pairId = null; p.partnerId = null; p.role = 'hider';
+                p.pairId = null; p.partnerId = null; p.role = 'hider'; p.dangerLevel = 0;
             });
             gameState = 'LOBBY';
             teamCount = 0;
@@ -259,6 +269,31 @@ function broadcastToPlayers(event, data) {
 function updateGameData() {
     io.to('admins').emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone, teamCount });
     const now = Date.now();
+    const seekers = Object.values(players).filter(p => p.role === 'seeker' && p.location);
+    const hiders = Object.values(players).filter(p => p.role === 'hider' && p.location);
+
+    hiders.forEach(hider => hider.dangerLevel = 0);
+
+    if (hiders.length > 0) {
+        seekers.forEach(seeker => {
+            let minDistance = Infinity;
+            let nearestHiderId = null;
+            hiders.forEach(hider => {
+                const distance = getDistance(seeker.location.latitude, seeker.location.longitude, hider.location.latitude, hider.location.longitude);
+                if (distance < minDistance) {
+                    minDistance = distance;
+                    nearestHiderId = hider.id;
+                }
+            });
+            
+            if (nearestHiderId) {
+                const level = getProximityLevel(minDistance);
+                // Застосовуємо найвищий рівень загрози, якщо на гравця полюють кілька шукачів
+                players[nearestHiderId].dangerLevel = Math.max(players[nearestHiderId].dangerLevel, level);
+            }
+        });
+    }
+
     for (const pId in players) {
         if (players[pId] && players[pId].socketId) {
             const player = players[pId];
@@ -267,12 +302,23 @@ function updateGameData() {
                 playersToSend.push(players[player.partnerId]);
             }
             const timeLeft = player.isOutside ? KICK_TIMEOUT - (now - player.outsideSince) : KICK_TIMEOUT;
+            
             const playerData = { 
                 gameState, 
                 players: playersToSend, 
                 zone: gameZone, 
-                zoneStatus: { isOutside: player.isOutside, timeLeft: timeLeft > 0 ? timeLeft : 0 }
+                zoneStatus: { isOutside: player.isOutside, timeLeft: timeLeft > 0 ? timeLeft : 0 },
+                dangerLevel: player.dangerLevel
             };
+
+            if (player.role === 'seeker' && player.location && hiders.length > 0) {
+                let minDistance = Infinity;
+                hiders.forEach(hider => {
+                    const distance = getDistance(player.location.latitude, player.location.longitude, hider.location.latitude, hider.location.longitude);
+                    if (distance < minDistance) minDistance = distance;
+                });
+                playerData.proximityLevel = getProximityLevel(minDistance);
+            }
             io.to(pId).emit('game_update', playerData);
         }
     }
