@@ -15,7 +15,6 @@
         }
         @keyframes fadeOut { 0% { opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
 
-        /* ОНОВЛЕНІ СТИЛІ ІНТЕРФЕЙСУ */
         .hud {
             position: absolute;
             left: 50%;
@@ -35,7 +34,6 @@
         .seeker-hud { bottom: 20px; }
         .hider-hud { top: 15px; }
 
-        /* Рівні для HUD */
         .level-1 { background-color: rgba(46, 204, 113, 0.8); } /* Зелений */
         .level-2 { background-color: rgba(241, 196, 15, 0.85); } /* Жовтий */
         .level-3 { background-color: rgba(231, 76, 60, 0.9); animation: pulse-red 1.5s infinite; } /* Червоний */
@@ -74,7 +72,6 @@
         const seekerHud = document.getElementById('seeker-hud');
         const hiderHud = document.getElementById('hider-hud');
 
-        // НОВІ ОБ'ЄКТИ З ТЕКСТОМ ДЛЯ РІВНІВ
         const SEEKER_MESSAGES = {
             1: 'Сигнал слабкий (>300м)',
             2: 'Сигнал стабільний (150-300м)',
@@ -134,7 +131,6 @@
             else zonePolygon = L.polygon([outerBounds, holeCoords], { color: 'red', weight: 2, fillColor: 'red', fillOpacity: 0.4, interactive: false }).addTo(map);
         }
         
-        // Функція для оновлення інтерфейсу
         function updateHud(element, level, messages) {
             element.classList.remove('level-1', 'level-2', 'level-3');
             if (level > 0 && messages[level]) {
@@ -153,14 +149,13 @@
             const me = players.find(p => p.id === myUserId);
             const partner = players.find(p => p.id !== myUserId);
 
-            // ОНОВЛЕНА ЛОГІКА КЕРУВАННЯ ІНТЕРФЕЙСОМ
             if (me) {
                 if (me.role === 'seeker') {
                     updateHud(seekerHud, proximityLevel, SEEKER_MESSAGES);
-                    hiderHud.style.display = 'none'; // Ховаємо HUD гравця
+                    hiderHud.style.display = 'none';
                 } else if (me.role === 'hider') {
                     updateHud(hiderHud, dangerLevel, HIDER_MESSAGES);
-                    seekerHud.style.display = 'none'; // Ховаємо HUD шукача
+                    seekerHud.style.display = 'none';
                 }
             }
 
