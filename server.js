@@ -37,12 +37,11 @@ function getDistance(lat1, lon1, lat2, lon2) {
     return R * c;
 }
 
-// НОВА ФУНКЦІЯ: ВИЗНАЧЕННЯ РІВНЯ ЗАГРОЗИ
 function getProximityLevel(distance) {
-    if (distance < 50) return 3;  // Дуже близько
-    if (distance < 150) return 2; // Близько
-    if (distance < 300) return 1; // Далеко
-    return 0;                     // Немає сигналу
+    if (distance < 50) return 3;
+    if (distance < 150) return 2;
+    if (distance < 300) return 1;
+    return 0;
 }
 
 setInterval(() => {
@@ -140,37 +139,32 @@ io.on('connection', (socket) => {
         }
     });
 
+    // ######### ОСНОВНЕ ВИПРАВЛЕННЯ ТУТ #########
     socket.on('admin_start_game', () => {
         if (isAdmin === 'true' && gameState === 'LOBBY') {
-            const playerIds = Object.keys(players);
-            if(playerIds.length === 0) return;
-            
-            for (let i = playerIds.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [playerIds[i], playerIds[j]] = [playerIds[j], playerIds[i]];
-            }
-            let pairCounter = 1;
-            for (let i = 0; i < playerIds.length; i += 2) {
-                const p1_id = playerIds[i];
-                const p2_id = playerIds[i+1];
-                if (p1_id && p2_id) {
-                    players[p1_id].pairId = pairCounter;
-                    players[p2_id].pairId = pairCounter;
-                    players[p1_id].partnerId = p2_id;
-                    players[p2_id].partnerId = p1_id;
-                } else if (p1_id) {
-                    players[p1_id].pairId = pairCounter;
+            const playerList = Object.values(players);
+            if (playerList.length === 0) return;
+
+            // ВИДАЛЕНО СТАРУ ЛОГІКУ ПЕРЕТАСОВКИ І СТВОРЕННЯ КОМАНД.
+            // Тепер команди, які адмін налаштував у лобі, зберігаються.
+
+            // Оновлюємо загальну кількість команд на основі існуючих даних
+            let maxPairId = 0;
+            playerList.forEach(p => {
+                if (p.pairId && p.pairId > maxPairId) {
+                    maxPairId = p.pairId;
                 }
-                pairCounter++;
-            }
-            teamCount = pairCounter - 1;
+            });
+            teamCount = maxPairId;
+
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
             io.emit('game_started');
-            scheduleNextHint();
+            scheduleNextHint(); // Запускаємо цикл підказок
             setTimeout(() => updateGameData(), 500);
         }
     });
+    // #############################################
 
     socket.on('admin_set_seeker', (playerId) => {
         if (isAdmin === 'true' && players[playerId]) {
@@ -288,7 +282,6 @@ function updateGameData() {
             
             if (nearestHiderId) {
                 const level = getProximityLevel(minDistance);
-                // Застосовуємо найвищий рівень загрози, якщо на гравця полюють кілька шукачів
                 players[nearestHiderId].dangerLevel = Math.max(players[nearestHiderId].dangerLevel, level);
             }
         });
