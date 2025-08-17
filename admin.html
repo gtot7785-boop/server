@@ -19,6 +19,7 @@
         #start-game-btn { background-color: #28a745; }
         #reset-game-btn { background-color: #dc3545; }
         #update-zone-btn, #broadcast-btn { background-color: #007bff; }
+        #force-hint-btn { background-color: #f0ad4e; } /* Новий стиль */
         input[type="number"], input[type="text"] { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
         hr { border: none; border-top: 1px solid #ddd; margin: 15px 0; }
         .player-controls { display: flex; align-items: center; }
@@ -44,6 +45,8 @@
             <h4>Глобальне повідомлення:</h4>
             <input type="text" id="broadcast-msg" placeholder="Введіть повідомлення...">
             <button id="broadcast-btn">Надіслати</button>
+            <hr>
+            <button id="force-hint-btn">Примусова підказка</button>
         </div>
         <hr>
         <button id="add-team-btn" style="background-color: #5bc0de;">Додати нову команду</button>
@@ -71,6 +74,7 @@
         const broadcastBtn = document.getElementById('broadcast-btn');
         const broadcastMsg = document.getElementById('broadcast-msg');
         const addTeamBtn = document.getElementById('add-team-btn');
+        const forceHintBtn = document.getElementById('force-hint-btn'); // Отримуємо нову кнопку
         const teamColors = ['#3498db', '#2ecc71', '#f1c40f', '#e74c3c', '#9b59b6', '#34495e', '#1abc9c', '#e67e22', '#d35400', '#c0392b'];
 
         let currentZone = null;
@@ -80,6 +84,7 @@
         startGameBtn.onclick = () => socket.emit('admin_start_game');
         resetGameBtn.onclick = () => { if (confirm('Ви впевнені?')) socket.emit('admin_reset_game'); };
         addTeamBtn.onclick = () => socket.emit('admin_add_team');
+        forceHintBtn.onclick = () => socket.emit('admin_force_hint'); // Додаємо обробник
         updateZoneBtn.onclick = () => {
             const newRadius = parseInt(radiusInput.value, 10);
             if (currentZone && newRadius > 0) socket.emit('admin_update_zone', { ...currentZone, radius: newRadius });
@@ -98,7 +103,6 @@
                 const playerName = target.dataset.name;
                 if (confirm(`Вигнати гравця ${playerName}?`)) socket.emit('admin_kick_player', playerId);
             }
-            // Ось обробник для іконки ока
             if (target.classList.contains('role-btn')) {
                 const playerId = target.dataset.id;
                 socket.emit('admin_set_seeker', playerId);
@@ -115,10 +119,12 @@
 
         socket.on('game_state_update', (data) => {
             const { gameState, players, zone, teamCount } = data;
+            const isInProgress = gameState === 'IN_PROGRESS';
             currentZone = zone;
+
             gameStatusEl.innerText = gameState;
-            startGameBtn.disabled = gameState === 'IN_PROGRESS';
-            gameControls.style.display = (gameState === 'IN_PROGRESS') ? 'block' : 'none';
+            startGameBtn.disabled = isInProgress;
+            gameControls.style.display = isInProgress ? 'block' : 'none';
             playerCountSpan.innerText = players.length;
             playerListUl.innerHTML = '';
             
@@ -129,7 +135,6 @@
             players.forEach(player => {
                 const li = document.createElement('li');
                 
-                // Ось код, який створює іконку та статус
                 const roleIcon = `<span class="role-btn" data-id="${player.id}" title="Призначити шукачем">&#128065;</span>`;
                 const playerNameHTML = `<span>${player.name} ${player.role === 'seeker' ? '<b>(Шукач)</b>' : ''}</span>`;
                 

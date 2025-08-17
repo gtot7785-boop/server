@@ -38,10 +38,10 @@ function getDistance(lat1, lon1, lat2, lon2) {
 }
 
 function getProximityLevel(distance) {
-    if (distance < 50) return 3;  // Дуже близько
-    if (distance < 150) return 2; // Близько
-    if (distance < 300) return 1; // Далеко
-    return 0;                     // Немає сигналу
+    if (distance < 50) return 3;
+    if (distance < 150) return 2;
+    if (distance < 300) return 1;
+    return 0;
 }
 
 setInterval(() => {
@@ -79,19 +79,27 @@ setInterval(() => {
     updateGameData();
 }, MAIN_INTERVAL);
 
+// РЕФАКТОРИНГ: Логіка підказки винесена в окрему функцію
+function triggerHint() {
+    if (gameState !== 'IN_PROGRESS') return;
+
+    const seekers = Object.values(players).filter(p => p.role === 'seeker');
+    const hiders = Object.values(players).filter(p => p.role === 'hider' && p.location);
+
+    if (seekers.length > 0 && hiders.length > 0) {
+        const randomHider = hiders[Math.floor(Math.random() * hiders.length)];
+        console.log(`[Hint] Генерую підказку на гравця ${randomHider.name}`);
+        const hintData = { latitude: randomHider.location.latitude, longitude: randomHider.location.longitude };
+        seekers.forEach(seeker => io.to(seeker.socketId).emit('game_hint', hintData));
+    }
+}
+
 function scheduleNextHint() {
     if (gameState !== 'IN_PROGRESS') return;
     const randomDelay = Math.floor(Math.random() * (180000 - 90000 + 1)) + 90000;
     console.log(`[Hint] Наступна підказка буде через ${Math.round(randomDelay / 1000)} секунд.`);
     hintTimeout = setTimeout(() => {
-        const seekers = Object.values(players).filter(p => p.role === 'seeker');
-        const hiders = Object.values(players).filter(p => p.role === 'hider' && p.location);
-        if (seekers.length > 0 && hiders.length > 0) {
-            const randomHider = hiders[Math.floor(Math.random() * hiders.length)];
-            console.log(`[Hint] Генерую підказку на гравця ${randomHider.name}`);
-            const hintData = { latitude: randomHider.location.latitude, longitude: randomHider.location.longitude };
-            seekers.forEach(seeker => io.to(seeker.socketId).emit('game_hint', hintData));
-        }
+        triggerHint();
         scheduleNextHint();
     }, randomDelay);
 }
@@ -157,6 +165,16 @@ io.on('connection', (socket) => {
             io.emit('game_started');
             scheduleNextHint();
             setTimeout(() => updateGameData(), 500);
+        }
+    });
+
+    // НОВИЙ ОБРОБНИК ДЛЯ КНОПКИ
+    socket.on('admin_force_hint', () => {
+        if (isAdmin === 'true' && gameState === 'IN_PROGRESS') {
+            console.log('[Admin] Примусова активація підказки.');
+            if (hintTimeout) clearTimeout(hintTimeout); // Зупиняємо старий таймер
+            triggerHint();      // Активуємо підказку негайно
+            scheduleNextHint(); // Плануємо наступну випадкову підказку
         }
     });
 
