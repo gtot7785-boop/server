@@ -37,7 +37,7 @@
         .level-1 { background-color: rgba(46, 204, 113, 0.8); }
         .level-2 { background-color: rgba(241, 196, 15, 0.85); }
         .level-3 { background-color: rgba(231, 76, 60, 0.9); animation: pulse-red 1.5s infinite; }
-
+        
         @keyframes pulse-red {
             0% { box-shadow: 0 0 5px 0 rgba(231, 76, 60, 0.7); }
             50% { box-shadow: 0 0 15px 5px rgba(231, 76, 60, 0.3); }
@@ -68,8 +68,6 @@
     <script src="https://unpkg.com/leaflet.animatedmarker@1.0.0/src/AnimatedMarker.js"></script>
 
     <script>
-        console.log("скрипт player.html почав виконуватися.");
-
         const map = L.map('map').setView([50.7472, 25.3253], 13);
         const seekerHud = document.getElementById('seeker-hud');
         const hiderHud = document.getElementById('hider-hud');
@@ -84,7 +82,7 @@
             2: 'Небезпека поруч!',
             3: 'ВАС МАЙЖЕ ЗНАЙШЛИ!'
         };
-
+        
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             attribution: 'Tiles &copy; Esri'
         }).addTo(map);
@@ -92,10 +90,7 @@
         const urlParams = new URLSearchParams(window.location.search);
         const myUserId = urlParams.get('userId');
 
-        if (!myUserId) {
-            console.error("Помилка: ID користувача не знайдено в URL!");
-            document.body.innerHTML = '<h1>Помилка: ID користувача не знайдено.</h1>';
-        }
+        if (!myUserId) document.body.innerHTML = '<h1>Помилка: ID користувача не знайдено.</h1>';
 
         L.LatLng.prototype.destination = function(bearing, distance) {
             const R = 6378137;
@@ -127,20 +122,15 @@
         }
 
         function updateZoneOnMap(zoneData) {
-            if (!zoneData || !zoneData.latitude || !zoneData.longitude) {
-                return;
-            }
+            if (!zoneData) return;
             const center = [zoneData.latitude, zoneData.longitude];
             const radius = zoneData.radius;
             const holeCoords = createCirclePolygon(center, radius);
             const outerBounds = [ [90, -180], [-90, -180], [-90, 180], [90, 180] ];
-            if (zonePolygon) {
-                zonePolygon.setLatLngs([outerBounds, holeCoords]);
-            } else {
-                zonePolygon = L.polygon([outerBounds, holeCoords], { color: 'red', weight: 2, fillColor: 'red', fillOpacity: 0.4, interactive: false }).addTo(map);
-            }
+            if (zonePolygon) zonePolygon.setLatLngs([outerBounds, holeCoords]);
+            else zonePolygon = L.polygon([outerBounds, holeCoords], { color: 'red', weight: 2, fillColor: 'red', fillOpacity: 0.4, interactive: false }).addTo(map);
         }
-
+        
         function updateHud(element, level, messages) {
             element.classList.remove('level-1', 'level-2', 'level-3');
             if (level > 0 && messages[level]) {
@@ -153,11 +143,9 @@
         }
 
         socket.on('game_update', (data) => {
-            if (!data || !data.players || !data.zone) {
-                return;
-            }
+            if (!data || !data.players || !data.zone) return;
             const { players, zone, proximityLevel, dangerLevel } = data;
-
+            
             const me = players.find(p => p.id === myUserId);
             const partner = players.find(p => p.id !== myUserId);
 
@@ -211,17 +199,26 @@
 
         socket.on('game_hint', (hintData) => {
             const hintCenter = [hintData.latitude, hintData.longitude];
+            
             const pulseIcon = L.divIcon({ className: 'hint-circle-pulse', iconSize: [50, 50] });
             const pulseMarker = L.marker(hintCenter, { icon: pulseIcon }).addTo(map);
-            const hintCircle = L.circle(hintCenter, { radius: 150, color: '#f1c40f', fillColor: '#f1c40f', fillOpacity: 0.2 }).addTo(map);
+
+            // ## ЗМІНА: Збільшуємо радіус підказки до 250 метрів ##
+            const hintCircle = L.circle(hintCenter, {
+                radius: 250,
+                color: '#f1c40f',
+                fillColor: '#f1c40f',
+                fillOpacity: 0.2
+            }).addTo(map);
+
             setTimeout(() => {
                 map.removeLayer(hintCircle);
                 map.removeLayer(pulseMarker);
             }, 10000);
         });
-
+        
         socket.on('force_reload', () => { location.reload(); });
-
+        
         socket.on('game_event', (message) => {
             const eventContainer = document.getElementById('event-container');
             const eventDiv = document.createElement('div');
@@ -231,7 +228,7 @@
             setTimeout(() => eventDiv.remove(), 5000);
         });
 
-        socket.on('connect', () => console.log('Сокет успішно підключено! ID:', socket.id));
+        socket.on('connect', () => console.log('Сокет успішно підключено!'));
         socket.on('disconnect', () => console.error('Сокет відключено!'));
     </script>
 </body>

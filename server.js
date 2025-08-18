@@ -48,7 +48,9 @@ setInterval(() => {
     if (gameState !== 'IN_PROGRESS') return;
     const now = Date.now();
     Object.values(players).forEach(player => {
-        if (!player || !player.location) return;
+        // ## ЗМІНА: Додаємо невразливість для шукачів ##
+        if (!player || !player.location || player.role === 'seeker') return;
+
         const distance = getDistance(player.location.latitude, player.location.longitude, gameZone.latitude, gameZone.longitude);
         if (distance > gameZone.radius) {
             if (!player.isOutside) {
@@ -79,10 +81,8 @@ setInterval(() => {
     updateGameData();
 }, MAIN_INTERVAL);
 
-// РЕФАКТОРИНГ: Логіка підказки винесена в окрему функцію
 function triggerHint() {
     if (gameState !== 'IN_PROGRESS') return;
-
     const seekers = Object.values(players).filter(p => p.role === 'seeker');
     const hiders = Object.values(players).filter(p => p.role === 'hider' && p.location);
 
@@ -90,7 +90,12 @@ function triggerHint() {
         const randomHider = hiders[Math.floor(Math.random() * hiders.length)];
         console.log(`[Hint] Генерую підказку на гравця ${randomHider.name}`);
         const hintData = { latitude: randomHider.location.latitude, longitude: randomHider.location.longitude };
-        seekers.forEach(seeker => io.to(seeker.socketId).emit('game_hint', hintData));
+        
+        seekers.forEach(seeker => {
+            io.to(seeker.socketId).emit('game_hint', hintData); // Для карти у WebView
+            // ## ЗМІНА: Надсилаємо подію для вібрації у додаток ##
+            io.to(seeker.socketId).emit('hint_vibration_alert');
+        });
     }
 }
 
@@ -105,6 +110,7 @@ function scheduleNextHint() {
 }
 
 io.on('connection', (socket) => {
+    // ... (решта коду без змін)
     const { isAdmin, userId } = socket.handshake.query;
     let currentUserId = userId || null;
 
@@ -118,7 +124,7 @@ io.on('connection', (socket) => {
         socket.join(currentUserId);
         console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone, teamCount });
-    }
+    } 
     else if (currentUserId && !players[currentUserId]) {
         console.log(`[Invalid ID] Гравець з недійсним ID '${currentUserId}' спробував підключитись. Скидаємо.`);
         socket.emit('game_reset');
@@ -133,7 +139,7 @@ io.on('connection', (socket) => {
         callback({ success: true, userId: newPlayerId });
         broadcastLobbyUpdate();
     });
-
+    
     socket.on('leave_game', () => {
         if (currentUserId && players[currentUserId]) {
             delete players[currentUserId];
@@ -167,14 +173,13 @@ io.on('connection', (socket) => {
             setTimeout(() => updateGameData(), 500);
         }
     });
-
-    // НОВИЙ ОБРОБНИК ДЛЯ КНОПКИ
+    
     socket.on('admin_force_hint', () => {
         if (isAdmin === 'true' && gameState === 'IN_PROGRESS') {
             console.log('[Admin] Примусова активація підказки.');
-            if (hintTimeout) clearTimeout(hintTimeout); // Зупиняємо старий таймер
-            triggerHint();      // Активуємо підказку негайно
-            scheduleNextHint(); // Плануємо наступну випадкову підказку
+            if (hintTimeout) clearTimeout(hintTimeout);
+            triggerHint();
+            scheduleNextHint();
         }
     });
 
@@ -240,7 +245,7 @@ io.on('connection', (socket) => {
             broadcastToPlayers('game_event', `🗣️ [ОГОЛОШЕННЯ] ${message}`);
         }
     });
-
+    
     socket.on('admin_reset_game', () => {
         if (isAdmin === 'true') {
             if (hintTimeout) clearTimeout(hintTimeout);
@@ -291,7 +296,7 @@ function updateGameData() {
                     nearestHiderId = hider.id;
                 }
             });
-
+            
             if (nearestHiderId) {
                 const level = getProximityLevel(minDistance);
                 players[nearestHiderId].dangerLevel = Math.max(players[nearestHiderId].dangerLevel, level);
@@ -307,11 +312,11 @@ function updateGameData() {
                 playersToSend.push(players[player.partnerId]);
             }
             const timeLeft = player.isOutside ? KICK_TIMEOUT - (now - player.outsideSince) : KICK_TIMEOUT;
-
-            const playerData = {
-                gameState,
-                players: playersToSend,
-                zone: gameZone,
+            
+            const playerData = { 
+                gameState, 
+                players: playersToSend, 
+                zone: gameZone, 
                 zoneStatus: { isOutside: player.isOutside, timeLeft: timeLeft > 0 ? timeLeft : 0 },
                 dangerLevel: player.dangerLevel
             };
