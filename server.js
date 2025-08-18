@@ -1,5 +1,5 @@
 const express = require('express');
-const http = require('http');
+const http =require('http');
 const { Server } = require("socket.io");
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
@@ -25,6 +25,31 @@ let gameZone = { latitude: 50.7472, longitude: 25.3253, radius: 5000 };
 let teamCount = 0;
 let hintTimeout = null;
 
+// ## НОВА ФУНКЦІЯ: Обробка вибуття гравця ##
+function eliminatePlayer(playerId, reason) {
+    if (!players[playerId]) return;
+
+    const playerName = players[playerId].name;
+    const playerSocketId = players[playerId].socketId;
+
+    console.log(`[Elimination] Гравець ${playerName} вибув. Причина: ${reason}`);
+
+    // 1. Надсилаємо приватне повідомлення гравцю, який вибув
+    if (playerSocketId) {
+        io.to(playerSocketId).emit('game_event', `Ви вибули з гри. Причина: ${reason}`);
+        io.to(playerSocketId).emit('game_reset');
+    }
+
+    // 2. Надсилаємо публічне повідомлення всім іншим
+    const publicMessage = `🏃‍♂️ Гравець ${playerName} вибув з гри!`;
+    io.emit('game_event', publicMessage); // io.emit надсилає всім, включаючи адмінів
+
+    // 3. Видаляємо гравця та оновлюємо списки
+    delete players[playerId];
+    broadcastLobbyUpdate();
+}
+
+
 function getDistance(lat1, lon1, lat2, lon2) {
     if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return 0;
     const R = 6371e3;
@@ -48,7 +73,6 @@ setInterval(() => {
     if (gameState !== 'IN_PROGRESS') return;
     const now = Date.now();
     Object.values(players).forEach(player => {
-        // ## ЗМІНА: Додаємо невразливість для шукачів ##
         if (!player || !player.location || player.role === 'seeker') return;
 
         const distance = getDistance(player.location.latitude, player.location.longitude, gameZone.latitude, gameZone.longitude);
@@ -64,10 +88,8 @@ setInterval(() => {
                 player.warningTickCounter = 0;
             }
             if (now - player.outsideSince > KICK_TIMEOUT) {
-                io.to(player.socketId).emit('game_event', 'Ви були занадто довго поза зоною і вибули з гри!');
-                io.to(player.socketId).emit('game_reset');
-                if (players[player.id]) delete players[player.id];
-                broadcastLobbyUpdate();
+                // ## ЗМІНА: Використовуємо нову функцію ##
+                eliminatePlayer(player.id, "занадто довго був поза зоною");
             }
         } else {
             if (player.isOutside) {
@@ -92,8 +114,7 @@ function triggerHint() {
         const hintData = { latitude: randomHider.location.latitude, longitude: randomHider.location.longitude };
         
         seekers.forEach(seeker => {
-            io.to(seeker.socketId).emit('game_hint', hintData); // Для карти у WebView
-            // ## ЗМІНА: Надсилаємо подію для вібрації у додаток ##
+            io.to(seeker.socketId).emit('game_hint', hintData);
             io.to(seeker.socketId).emit('hint_vibration_alert');
         });
     }
@@ -110,7 +131,6 @@ function scheduleNextHint() {
 }
 
 io.on('connection', (socket) => {
-    // ... (решта коду без змін)
     const { isAdmin, userId } = socket.handshake.query;
     let currentUserId = userId || null;
 
@@ -139,7 +159,7 @@ io.on('connection', (socket) => {
         callback({ success: true, userId: newPlayerId });
         broadcastLobbyUpdate();
     });
-    
+
     socket.on('leave_game', () => {
         if (currentUserId && players[currentUserId]) {
             delete players[currentUserId];
@@ -200,13 +220,8 @@ io.on('connection', (socket) => {
 
     socket.on('admin_kick_player', (playerIdToKick) => {
         if (isAdmin === 'true' && players[playerIdToKick]) {
-            const kickedPlayerSocketId = players[playerIdToKick].socketId;
-            if (kickedPlayerSocketId) {
-                io.to(kickedPlayerSocketId).emit('game_event', 'Адміністратор виключив вас з гри.');
-                io.to(kickedPlayerSocketId).emit('game_reset');
-            }
-            delete players[playerIdToKick];
-            broadcastLobbyUpdate();
+            // ## ЗМІНА: Використовуємо нову функцію ##
+            eliminatePlayer(playerIdToKick, "виключено адміністратором");
         }
     });
 
