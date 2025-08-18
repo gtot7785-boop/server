@@ -89,7 +89,6 @@
     <script>
         const map = L.map('map').setView([50.7472, 25.3253], 13);
         
-        // ## ЗМІНА: Використовуємо супутниковий шар карти, як у гравців ##
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             attribution: 'Tiles &copy; Esri'
         }).addTo(map);
@@ -112,24 +111,86 @@
         const teamColors = ['#3498db', '#2ecc71', '#f1c40f', '#e74c3c', '#9b59b6', '#34495e', '#1abc9c', '#e67e22', '#d35400', '#c0392b'];
 
         let currentZone = null;
-        let zoneCircle = null;
         let playerMarkers = {};
         let isFirstNotification = true;
+        let zonePolygon = null;
+
+        // ## НОВЕ: Змінна для кола попереднього перегляду ##
+        let previewCircle = null;
+
+        L.LatLng.prototype.destination = function(bearing, distance) {
+            const R = 6378137;
+            const toRad = Math.PI / 180;
+            const toBrng = bearing * toRad;
+            const lat1 = this.lat * toRad;
+            const lon1 = this.lng * toRad;
+            const lat2 = Math.asin(Math.sin(lat1) * Math.cos(distance / R) + Math.cos(lat1) * Math.sin(distance / R) * Math.cos(toBrng));
+            let lon2 = lon1 + Math.atan2(Math.sin(toBrng) * Math.sin(distance / R) * Math.cos(lat1), Math.cos(distance / R) - Math.sin(lat1) * Math.sin(lat2));
+            const toDeg = 180 / Math.PI;
+            lon2 = (lon2 * toDeg + 540) % 360 - 180;
+            return L.latLng(lat2 * toDeg, lon2);
+        };
+
+        function createCirclePolygon(center, radius, points = 64) {
+            const latlngs = [];
+            for (let i = 0; i < points; i++) {
+                const angle = (i / points) * 360;
+                const destination = L.latLng(center).destination(angle, radius);
+                latlngs.push([destination.lat, destination.lng]);
+            }
+            return latlngs;
+        }
+
+        function updateZoneOnMap(zoneData) {
+            if (!zoneData) return;
+            const center = [zoneData.latitude, zoneData.longitude];
+            const radius = zoneData.radius;
+            const holeCoords = createCirclePolygon(center, radius);
+            const outerBounds = [ [90, -180], [-90, -180], [-90, 180], [90, 180] ];
+            if (zonePolygon) {
+                zonePolygon.setLatLngs([outerBounds, holeCoords]);
+            } else {
+                zonePolygon = L.polygon([outerBounds, holeCoords], { color: '#007bff', weight: 2, fillColor: '#007bff', fillOpacity: 0.3, interactive: false }).addTo(map);
+            }
+        }
 
         startGameBtn.onclick = () => socket.emit('admin_start_game');
         resetGameBtn.onclick = () => { if (confirm('Ви впевнені?')) socket.emit('admin_reset_game'); };
         addTeamBtn.onclick = () => socket.emit('admin_add_team');
         forceHintBtn.onclick = () => socket.emit('admin_force_hint');
+        
         updateZoneBtn.onclick = () => {
             const newRadius = parseInt(radiusInput.value, 10);
-            if (currentZone && newRadius > 0) socket.emit('admin_update_zone', { ...currentZone, radius: newRadius });
+            if (currentZone && newRadius > 0) {
+                socket.emit('admin_update_zone', { ...currentZone, radius: newRadius });
+                // ## НОВЕ: Ховаємо попередній перегляд після оновлення ##
+                if (previewCircle) previewCircle.setRadius(0);
+            }
         };
+
         broadcastBtn.onclick = () => {
             if (broadcastMsg.value) {
                 socket.emit('admin_broadcast_message', broadcastMsg.value);
                 broadcastMsg.value = '';
             }
         };
+
+        // ## НОВЕ: Обробники для поля вводу радіуса ##
+        radiusInput.oninput = () => {
+            if (!previewCircle) return;
+            const newRadius = parseInt(radiusInput.value, 10);
+            if (newRadius > 0) {
+                previewCircle.setRadius(newRadius);
+            } else {
+                previewCircle.setRadius(0);
+            }
+        };
+
+        radiusInput.onblur = () => {
+            // Ховаємо попередній перегляд, коли поле втрачає фокус
+            if (previewCircle) previewCircle.setRadius(0);
+        };
+
 
         playerListUl.addEventListener('click', (event) => {
             const target = event.target;
@@ -180,10 +241,8 @@
 
             players.forEach(player => {
                 const li = document.createElement('li');
-                
                 const roleIcon = `<span class="role-btn" data-id="${player.id}" title="Призначити шукачем">&#128065;</span>`;
                 const playerNameHTML = `<span>${player.name} ${player.role === 'seeker' ? '<b>(Шукач)</b>' : ''}</span>`;
-                
                 let selectOptions = `<option value="null">Без команди</option>`;
                 for (let i = 1; i <= maxPairs; i++) {
                     const selected = player.pairId === i ? 'selected' : '';
@@ -191,12 +250,7 @@
                 }
                 const pairSelect = `<select class="pair-select" data-id="${player.id}">${selectOptions}</select>`;
                 const kickButton = `<button class="kick-btn" data-id="${player.id}" data-name="${player.name}">Вигнати</button>`;
-                
-                li.innerHTML = `
-                    <div style="display: flex; align-items: center;">${roleIcon}${playerNameHTML}</div>
-                    <div class="player-controls">${pairSelect}${kickButton}</div>
-                `;
-                
+                li.innerHTML = `<div style="display: flex; align-items: center;">${roleIcon}${playerNameHTML}</div><div class="player-controls">${pairSelect}${kickButton}</div>`;
                 if (player.pairId) li.style.backgroundColor = teamColors[player.pairId % teamColors.length] + '33';
                 playerListUl.appendChild(li);
 
@@ -213,9 +267,19 @@
 
             if (zone) {
                 if (document.activeElement !== radiusInput) radiusInput.value = zone.radius;
-                const center = [zone.latitude, zone.longitude];
-                if (zoneCircle) zoneCircle.setLatLng(center).setRadius(zone.radius);
-                else zoneCircle = L.circle(center, { radius: zone.radius, color: 'blue', fillOpacity: 0.1 }).addTo(map);
+                updateZoneOnMap(zone);
+
+                // ## НОВЕ: Створюємо невидиме коло для перегляду, якщо його ще немає ##
+                if (!previewCircle) {
+                    previewCircle = L.circle([zone.latitude, zone.longitude], {
+                        radius: 0, // Початковий радіус 0, щоб було невидимим
+                        color: '#f0ad4e',
+                        weight: 3,
+                        dashArray: '10, 10', // Пунктирна лінія
+                        fill: false,
+                        interactive: false
+                    }).addTo(map);
+                }
             }
         });
     </script>
