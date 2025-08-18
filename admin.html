@@ -27,7 +27,6 @@
         .pair-select { margin-right: 8px; }
         .role-btn { cursor: pointer; margin-right: 8px; font-size: 16px; user-select: none; }
         
-        /* ## НОВІ СТИЛІ: Блок сповіщень ## */
         #notifications-log {
             border: 1px solid #ccc;
             background-color: #fff;
@@ -89,7 +88,12 @@
 
     <script>
         const map = L.map('map').setView([50.7472, 25.3253], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        
+        // ## ЗМІНА: Використовуємо супутниковий шар карти, як у гравців ##
+        L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            attribution: 'Tiles &copy; Esri'
+        }).addTo(map);
+
         const socket = io({ query: { isAdmin: 'true' } });
         
         const gameStatusEl = document.getElementById('game-status');
@@ -104,7 +108,7 @@
         const broadcastMsg = document.getElementById('broadcast-msg');
         const addTeamBtn = document.getElementById('add-team-btn');
         const forceHintBtn = document.getElementById('force-hint-btn');
-        const notificationsLog = document.getElementById('notifications-log'); // Отримуємо блок сповіщень
+        const notificationsLog = document.getElementById('notifications-log');
         const teamColors = ['#3498db', '#2ecc71', '#f1c40f', '#e74c3c', '#9b59b6', '#34495e', '#1abc9c', '#e67e22', '#d35400', '#c0392b'];
 
         let currentZone = null;
@@ -148,10 +152,9 @@
             }
         });
 
-        // ## НОВА ПОДІЯ: Обробка сповіщень від шукачів ##
         socket.on('admin_notification', (data) => {
             if (isFirstNotification) {
-                notificationsLog.innerHTML = ''; // Очищуємо стартове повідомлення
+                notificationsLog.innerHTML = '';
                 isFirstNotification = false;
             }
             const notificationEl = document.createElement('p');
