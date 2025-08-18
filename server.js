@@ -4,6 +4,7 @@ const { Server } = require("socket.io");
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 
+// ... (решта констант без змін)
 const PORT = 8080;
 const MAIN_INTERVAL = 2000;
 const WARNING_INTERVAL = 60000;
@@ -25,30 +26,20 @@ let gameZone = { latitude: 50.7472, longitude: 25.3253, radius: 5000 };
 let teamCount = 0;
 let hintTimeout = null;
 
-// ## НОВА ФУНКЦІЯ: Обробка вибуття гравця ##
 function eliminatePlayer(playerId, reason) {
     if (!players[playerId]) return;
-
     const playerName = players[playerId].name;
     const playerSocketId = players[playerId].socketId;
-
     console.log(`[Elimination] Гравець ${playerName} вибув. Причина: ${reason}`);
-
-    // 1. Надсилаємо приватне повідомлення гравцю, який вибув
     if (playerSocketId) {
         io.to(playerSocketId).emit('game_event', `Ви вибули з гри. Причина: ${reason}`);
         io.to(playerSocketId).emit('game_reset');
     }
-
-    // 2. Надсилаємо публічне повідомлення всім іншим
     const publicMessage = `🏃‍♂️ Гравець ${playerName} вибув з гри!`;
-    io.emit('game_event', publicMessage); // io.emit надсилає всім, включаючи адмінів
-
-    // 3. Видаляємо гравця та оновлюємо списки
+    io.emit('game_event', publicMessage);
     delete players[playerId];
     broadcastLobbyUpdate();
 }
-
 
 function getDistance(lat1, lon1, lat2, lon2) {
     if (lat1 == null || lon1 == null || lat2 == null || lon2 == null) return 0;
@@ -74,7 +65,6 @@ setInterval(() => {
     const now = Date.now();
     Object.values(players).forEach(player => {
         if (!player || !player.location || player.role === 'seeker') return;
-
         const distance = getDistance(player.location.latitude, player.location.longitude, gameZone.latitude, gameZone.longitude);
         if (distance > gameZone.radius) {
             if (!player.isOutside) {
@@ -88,7 +78,6 @@ setInterval(() => {
                 player.warningTickCounter = 0;
             }
             if (now - player.outsideSince > KICK_TIMEOUT) {
-                // ## ЗМІНА: Використовуємо нову функцію ##
                 eliminatePlayer(player.id, "занадто довго був поза зоною");
             }
         } else {
@@ -107,12 +96,10 @@ function triggerHint() {
     if (gameState !== 'IN_PROGRESS') return;
     const seekers = Object.values(players).filter(p => p.role === 'seeker');
     const hiders = Object.values(players).filter(p => p.role === 'hider' && p.location);
-
     if (seekers.length > 0 && hiders.length > 0) {
         const randomHider = hiders[Math.floor(Math.random() * hiders.length)];
         console.log(`[Hint] Генерую підказку на гравця ${randomHider.name}`);
         const hintData = { latitude: randomHider.location.latitude, longitude: randomHider.location.longitude };
-        
         seekers.forEach(seeker => {
             io.to(seeker.socketId).emit('game_hint', hintData);
             io.to(seeker.socketId).emit('hint_vibration_alert');
@@ -144,7 +131,7 @@ io.on('connection', (socket) => {
         socket.join(currentUserId);
         console.log(`[Reconnect] Гравець '${players[currentUserId].name}' повернувся в гру.`);
         socket.emit('game_state_update', { gameState, players: Object.values(players), zone: gameZone, teamCount });
-    } 
+    }
     else if (currentUserId && !players[currentUserId]) {
         console.log(`[Invalid ID] Гравець з недійсним ID '${currentUserId}' спробував підключитись. Скидаємо.`);
         socket.emit('game_reset');
@@ -162,8 +149,7 @@ io.on('connection', (socket) => {
 
     socket.on('leave_game', () => {
         if (currentUserId && players[currentUserId]) {
-            delete players[currentUserId];
-            broadcastLobbyUpdate();
+            eliminatePlayer(currentUserId, "вийшов з гри");
         }
     });
 
@@ -177,7 +163,6 @@ io.on('connection', (socket) => {
         if (isAdmin === 'true' && gameState === 'LOBBY') {
             const playerList = Object.values(players);
             if (playerList.length === 0) return;
-
             let maxPairId = 0;
             playerList.forEach(p => {
                 if (p.pairId && p.pairId > maxPairId) {
@@ -185,7 +170,6 @@ io.on('connection', (socket) => {
                 }
             });
             teamCount = maxPairId;
-
             gameState = 'IN_PROGRESS';
             console.log('[Admin] Гру розпочато!');
             io.emit('game_started');
@@ -200,6 +184,16 @@ io.on('connection', (socket) => {
             if (hintTimeout) clearTimeout(hintTimeout);
             triggerHint();
             scheduleNextHint();
+        }
+    });
+
+    // ## НОВА ПОДІЯ: Шукач повідомляє, що знайшов гравця ##
+    socket.on('seeker_report_catch', (data) => {
+        const seeker = players[currentUserId];
+        if (seeker && seeker.role === 'seeker' && data && data.hiderName) {
+            const message = `🔔 ЗАПИТ: Шукач '${seeker.name}' повідомляє, що знайшов гравця '${data.hiderName}'. Перевірте їх розташування на карті.`;
+            io.to('admins').emit('admin_notification', { message });
+            console.log(`[Report] ${seeker.name} reported catching ${data.hiderName}`);
         }
     });
 
@@ -220,7 +214,6 @@ io.on('connection', (socket) => {
 
     socket.on('admin_kick_player', (playerIdToKick) => {
         if (isAdmin === 'true' && players[playerIdToKick]) {
-            // ## ЗМІНА: Використовуємо нову функцію ##
             eliminatePlayer(playerIdToKick, "виключено адміністратором");
         }
     });
@@ -278,7 +271,13 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         const disconnectedPlayer = Object.values(players).find(p => p.socketId === socket.id);
-        if (disconnectedPlayer) console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' тимчасово відключився.`);
+        if (disconnectedPlayer && gameState === 'IN_PROGRESS') {
+             eliminatePlayer(disconnectedPlayer.id, "втрачено зв'язок");
+        } else if (disconnectedPlayer) {
+             delete players[disconnectedPlayer.id];
+             broadcastLobbyUpdate();
+             console.log(`[Disconnect] Гравець '${disconnectedPlayer.name}' відключився з лобі.`);
+        }
     });
 });
 
@@ -336,13 +335,15 @@ function updateGameData() {
                 dangerLevel: player.dangerLevel
             };
 
-            if (player.role === 'seeker' && player.location && hiders.length > 0) {
+            if (player.role === 'seeker' && player.location) {
                 let minDistance = Infinity;
                 hiders.forEach(hider => {
                     const distance = getDistance(player.location.latitude, player.location.longitude, hider.location.latitude, hider.location.longitude);
                     if (distance < minDistance) minDistance = distance;
                 });
                 playerData.proximityLevel = getProximityLevel(minDistance);
+                // ## ЗМІНА: Надсилаємо шукачу список гравців для вибору ##
+                playerData.hidersList = hiders.map(h => ({ id: h.id, name: h.name }));
             }
             io.to(pId).emit('game_update', playerData);
         }

@@ -8,7 +8,7 @@
     <style>
         body { margin: 0; padding: 0; font-family: sans-serif; display: flex; height: 100vh; }
         #map { flex-grow: 1; height: 100%; }
-        .sidebar { width: 350px; padding: 15px; background: #f4f4f4; overflow-y: auto; box-sizing: border-box; display: flex; flex-direction: column; }
+        .sidebar { width: 400px; padding: 15px; background: #f4f4f4; overflow-y: auto; box-sizing: border-box; display: flex; flex-direction: column; }
         .sidebar h3, .sidebar h4 { border-bottom: 2px solid #ddd; padding-bottom: 5px; margin-top: 0;}
         .game-controls { display: none; }
         #player-list { list-style: none; padding: 0; margin: 0; flex-grow: 1; }
@@ -26,12 +26,41 @@
         .kick-btn { background-color: #e74c3c; color: white; border: none; padding: 4px 8px; font-size: 12px; cursor: pointer; border-radius: 4px; margin-left: 8px; }
         .pair-select { margin-right: 8px; }
         .role-btn { cursor: pointer; margin-right: 8px; font-size: 16px; user-select: none; }
+        
+        /* ## НОВІ СТИЛІ: Блок сповіщень ## */
+        #notifications-log {
+            border: 1px solid #ccc;
+            background-color: #fff;
+            padding: 10px;
+            margin-bottom: 15px;
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        #notifications-log p {
+            margin: 0 0 5px 0;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+            font-size: 14px;
+        }
+        .notification-new {
+            animation: highlight 2s ease-out;
+        }
+        @keyframes highlight {
+            from { background-color: #f0ad4e; }
+            to { background-color: #fff; }
+        }
     </style>
 </head>
 <body>
     <div id="map"></div>
     <div class="sidebar">
         <h3>Адмін-панель</h3>
+
+        <h4>Сповіщення від шукачів:</h4>
+        <div id="notifications-log">
+            <p style="color: #888;">Тут з'являтимуться запити...</p>
+        </div>
+
         <p>Статус гри: <b id="game-status">...</b></p>
         <button id="start-game-btn">Розпочати гру</button>
         <button id="reset-game-btn">Скинути гру</button>
@@ -75,11 +104,13 @@
         const broadcastMsg = document.getElementById('broadcast-msg');
         const addTeamBtn = document.getElementById('add-team-btn');
         const forceHintBtn = document.getElementById('force-hint-btn');
+        const notificationsLog = document.getElementById('notifications-log'); // Отримуємо блок сповіщень
         const teamColors = ['#3498db', '#2ecc71', '#f1c40f', '#e74c3c', '#9b59b6', '#34495e', '#1abc9c', '#e67e22', '#d35400', '#c0392b'];
 
         let currentZone = null;
         let zoneCircle = null;
         let playerMarkers = {};
+        let isFirstNotification = true;
 
         startGameBtn.onclick = () => socket.emit('admin_start_game');
         resetGameBtn.onclick = () => { if (confirm('Ви впевнені?')) socket.emit('admin_reset_game'); };
@@ -115,6 +146,18 @@
                 const newPairId = event.target.value;
                 socket.emit('admin_move_player', { playerId, newPairId });
             }
+        });
+
+        // ## НОВА ПОДІЯ: Обробка сповіщень від шукачів ##
+        socket.on('admin_notification', (data) => {
+            if (isFirstNotification) {
+                notificationsLog.innerHTML = ''; // Очищуємо стартове повідомлення
+                isFirstNotification = false;
+            }
+            const notificationEl = document.createElement('p');
+            notificationEl.innerText = data.message;
+            notificationEl.classList.add('notification-new');
+            notificationsLog.prepend(notificationEl);
         });
 
         socket.on('game_state_update', (data) => {

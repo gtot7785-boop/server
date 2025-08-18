@@ -19,17 +19,10 @@
             position: absolute;
             left: 50%;
             transform: translateX(-50%);
-            color: white;
-            padding: 10px 25px;
-            border-radius: 15px;
-            z-index: 1000;
-            font-family: sans-serif;
-            text-align: center;
-            font-size: 16px;
-            font-weight: bold;
-            border: 2px solid white;
-            display: none;
-            transition: background-color 0.5s ease;
+            color: white; padding: 10px 25px; border-radius: 15px;
+            z-index: 1000; font-family: sans-serif; text-align: center;
+            font-size: 16px; font-weight: bold; border: 2px solid white;
+            display: none; transition: background-color 0.5s ease;
         }
         .seeker-hud { bottom: 20px; }
         .hider-hud { top: 15px; }
@@ -51,9 +44,33 @@
         }
         .hint-circle-pulse {
             animation: pulse 1.5s infinite;
-            border-radius: 50%;
-            border: 3px solid #f1c40f;
-            box-shadow: 0 0 10px #f1c40f;
+            border-radius: 50%; border: 3px solid #f1c40f; box-shadow: 0 0 10px #f1c40f;
+        }
+
+        /* ## НОВІ СТИЛІ: Панель вибору цілі для шукача ## */
+        #hider-list-panel {
+            position: absolute;
+            top: 20px; right: 20px;
+            background: rgba(0,0,0,0.75);
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            z-index: 1000;
+            max-height: 50vh;
+            overflow-y: auto;
+            display: none; /* Сховано за замовчуванням */
+        }
+        #hider-list-panel h4 { margin: 0 0 10px 0; text-align: center; }
+        #hider-list { list-style: none; padding: 0; margin: 0; }
+        #hider-list li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+        #hider-list button {
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 5px;
+            cursor: pointer;
+            margin-left: 10px;
         }
     </style>
 </head>
@@ -63,6 +80,11 @@
     <div id="seeker-hud" class="hud seeker-hud"></div>
     <div id="hider-hud" class="hud hider-hud"></div>
 
+    <div id="hider-list-panel">
+        <h4>Цілі:</h4>
+        <ul id="hider-list"></ul>
+    </div>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="https://unpkg.com/leaflet.animatedmarker@1.0.0/src/AnimatedMarker.js"></script>
@@ -71,17 +93,11 @@
         const map = L.map('map').setView([50.7472, 25.3253], 13);
         const seekerHud = document.getElementById('seeker-hud');
         const hiderHud = document.getElementById('hider-hud');
-
-        const SEEKER_MESSAGES = {
-            1: 'Сигнал слабкий (>300м)',
-            2: 'Сигнал стабільний (150-300м)',
-            3: 'СИГНАЛ ДУЖЕ СИЛЬНИЙ (<150м)'
-        };
-        const HIDER_MESSAGES = {
-            1: 'Відчуття тривоги...',
-            2: 'Небезпека поруч!',
-            3: 'ВАС МАЙЖЕ ЗНАЙШЛИ!'
-        };
+        const hiderListPanel = document.getElementById('hider-list-panel'); // Отримуємо панель
+        const hiderListUl = document.getElementById('hider-list');       // Отримуємо список
+        
+        const SEEKER_MESSAGES = { 1: 'Сигнал слабкий (>300м)', 2: 'Сигнал стабільний (150-300м)', 3: 'СИГНАЛ ДУЖЕ СИЛЬНИЙ (<150м)' };
+        const HIDER_MESSAGES = { 1: 'Відчуття тривоги...', 2: 'Небезпека поруч!', 3: 'ВАС МАЙЖЕ ЗНАЙШЛИ!' };
         
         L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
             attribution: 'Tiles &copy; Esri'
@@ -144,7 +160,7 @@
 
         socket.on('game_update', (data) => {
             if (!data || !data.players || !data.zone) return;
-            const { players, zone, proximityLevel, dangerLevel } = data;
+            const { players, zone, proximityLevel, dangerLevel, hidersList } = data;
             
             const me = players.find(p => p.id === myUserId);
             const partner = players.find(p => p.id !== myUserId);
@@ -153,17 +169,34 @@
                 if (me.role === 'seeker') {
                     updateHud(seekerHud, proximityLevel, SEEKER_MESSAGES);
                     hiderHud.style.display = 'none';
+                    hiderListPanel.style.display = 'block'; // Показуємо панель
+                    
+                    // Оновлюємо список гравців у панелі
+                    hiderListUl.innerHTML = '';
+                    if (hidersList && hidersList.length > 0) {
+                        hidersList.forEach(hider => {
+                            const li = document.createElement('li');
+                            li.innerHTML = `
+                                <span>${hider.name}</span>
+                                <button class="report-btn" data-hider-id="${hider.id}" data-hider-name="${hider.name}">Зловив</button>
+                            `;
+                            hiderListUl.appendChild(li);
+                        });
+                    } else {
+                        hiderListUl.innerHTML = '<li>Немає цілей</li>';
+                    }
+
                 } else if (me.role === 'hider') {
                     updateHud(hiderHud, dangerLevel, HIDER_MESSAGES);
                     seekerHud.style.display = 'none';
+                    hiderListPanel.style.display = 'none'; // Ховаємо панель
                 }
             }
 
             if (me && me.location) {
                 const latLng = [me.location.latitude, me.location.longitude];
-                if (myMarker) {
-                    myMarker.setLatLng(latLng);
-                } else {
+                if (myMarker) myMarker.setLatLng(latLng);
+                else {
                     const myIconColor = me.role === 'seeker' ? '#e74c3c' : '#2980b9';
                     myMarker = L.marker(latLng, {
                         icon: L.divIcon({
@@ -178,9 +211,8 @@
 
             if (partner && partner.location) {
                 const latLng = [partner.location.latitude, partner.location.longitude];
-                if (partnerMarker) {
-                    partnerMarker.setLatLng(latLng);
-                } else {
+                if (partnerMarker) partnerMarker.setLatLng(latLng);
+                else {
                     const partnerIconColor = partner.role === 'seeker' ? '#e74c3c' : '#2ecc71';
                     partnerMarker = L.marker(latLng, {
                         icon: L.divIcon({
@@ -197,20 +229,24 @@
             updateZoneOnMap(zone);
         });
 
+        // ## НОВА ПОДІЯ: Обробник натискання на кнопку "Зловив" ##
+        hiderListPanel.addEventListener('click', (event) => {
+            if (event.target.classList.contains('report-btn')) {
+                const hiderId = event.target.dataset.hiderId;
+                const hiderName = event.target.dataset.hiderName;
+                if (confirm(`Надіслати адміну запит, що ви зловили гравця ${hiderName}?`)) {
+                    socket.emit('seeker_report_catch', { hiderId, hiderName });
+                    event.target.disabled = true;
+                    event.target.innerText = 'Надіслано';
+                }
+            }
+        });
+
         socket.on('game_hint', (hintData) => {
             const hintCenter = [hintData.latitude, hintData.longitude];
-            
             const pulseIcon = L.divIcon({ className: 'hint-circle-pulse', iconSize: [50, 50] });
             const pulseMarker = L.marker(hintCenter, { icon: pulseIcon }).addTo(map);
-
-            // ## ЗМІНА: Збільшуємо радіус підказки до 250 метрів ##
-            const hintCircle = L.circle(hintCenter, {
-                radius: 250,
-                color: '#f1c40f',
-                fillColor: '#f1c40f',
-                fillOpacity: 0.2
-            }).addTo(map);
-
+            const hintCircle = L.circle(hintCenter, { radius: 250, color: '#f1c40f', fillColor: '#f1c40f', fillOpacity: 0.2 }).addTo(map);
             setTimeout(() => {
                 map.removeLayer(hintCircle);
                 map.removeLayer(pulseMarker);
