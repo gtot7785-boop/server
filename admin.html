@@ -19,7 +19,7 @@
         #start-game-btn { background-color: #28a745; }
         #reset-game-btn { background-color: #dc3545; }
         #update-zone-btn, #broadcast-btn { background-color: #007bff; }
-        #force-hint-btn { background-color: #f0ad4e; } /* Новий стиль */
+        #force-hint-btn { background-color: #f0ad4e; }
         input[type="number"], input[type="text"] { width: 100%; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
         hr { border: none; border-top: 1px solid #ddd; margin: 15px 0; }
         .player-controls { display: flex; align-items: center; }
@@ -74,7 +74,7 @@
         const broadcastBtn = document.getElementById('broadcast-btn');
         const broadcastMsg = document.getElementById('broadcast-msg');
         const addTeamBtn = document.getElementById('add-team-btn');
-        const forceHintBtn = document.getElementById('force-hint-btn'); // Отримуємо нову кнопку
+        const forceHintBtn = document.getElementById('force-hint-btn');
         const teamColors = ['#3498db', '#2ecc71', '#f1c40f', '#e74c3c', '#9b59b6', '#34495e', '#1abc9c', '#e67e22', '#d35400', '#c0392b'];
 
         let currentZone = null;
@@ -84,7 +84,7 @@
         startGameBtn.onclick = () => socket.emit('admin_start_game');
         resetGameBtn.onclick = () => { if (confirm('Ви впевнені?')) socket.emit('admin_reset_game'); };
         addTeamBtn.onclick = () => socket.emit('admin_add_team');
-        forceHintBtn.onclick = () => socket.emit('admin_force_hint'); // Додаємо обробник
+        forceHintBtn.onclick = () => socket.emit('admin_force_hint');
         updateZoneBtn.onclick = () => {
             const newRadius = parseInt(radiusInput.value, 10);
             if (currentZone && newRadius > 0) socket.emit('admin_update_zone', { ...currentZone, radius: newRadius });
